@@ -245,7 +245,7 @@ Proof.
 represent.
 Qed.
 
-Goal (representableP 0 (forall d, d i= iO)).
+Goal (representableP 0 (forall d, False -> iσ d i= iO)).
 Proof. 
 represent. 
 Qed.
@@ -255,6 +255,22 @@ Proof.
 represent.
 Qed.
 
+Check well_founded_induction.
+Check List.Forall.
+Structure matchEnviron : Type := {
+target : Type;
+subterm : target -> target -> Prop;
+subterm_wf : well_founded subterm;
+selector : forall t:target, option {l : list (target) & List.Forall (fun k => subterm k t) l};
+
+}.
+
+Lemma foldingForall (P : Prop) phi rho : @representsP 0 phi rho P -> representableP 0 (forall x:D, P).
+intros H. unfold representsP in H. unfold representableP. 
+pose (∀ phi) as kk. exists kk. exists rho. split.
+* intros Hf d. apply H. now apply Hf.
+* intros Hb d. apply H. now apply Hb.
+Qed.
 
 Print k.
   Lemma sat_single (rho : nat -> D) (Phi : form) (t : term) :
