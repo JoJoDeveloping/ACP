@@ -1,9 +1,7 @@
+Require Import MetaCoq.Checker.Checker.
 From MetaCoq.Template Require Import utils All Pretty.
-Print term.
-Locate term.
 Require Import List String.
 Import MonadNotation.
-
 Require Import FOL.
 Require Import Deduction.
 Require Import Tarski.
@@ -109,7 +107,7 @@ Section Models.
   Definition Equality := forall v, @i_P _ _ D I Eq v <-> Vector.hd v = Vector.hd (Vector.tl v). 
   Hypothesis equality : forall v, @i_P _ _ D I Eq v <-> Vector.hd v = Vector.hd (Vector.tl v).
 
-  Notation "'iO'" := (i_f (f:=Zero) (Vector.nil D)).
+  Notation iO := (i_f (f:=Zero) (Vector.nil D)).
   Notation "'iσ' d" := (i_f (f:=Succ) (Vector.cons d (Vector.nil D))) (at level 37).
   Notation "x 'i⊕' y" := (i_f (f:=Plus) (Vector.cons x (Vector.cons y (Vector.nil D)))) (at level 39).
   Notation "x 'i⊗' y" := (i_f (f:=Mult) (Vector.cons x (Vector.cons y (Vector.nil D)))) (at level 38).
@@ -123,107 +121,124 @@ Section Models.
   Definition representsF (d:D) trm rho := eval rho trm = d.
   Definition representableF (d:D) := exists trm rho, representsF d trm rho.
 
-
-Notation quoteO := (tApp (tConst (MPfile (["Tarski"; "Arith"]), "i_f") nil)
-   ([tConst (MPfile (["Reflection"; "Arith"]), "PA_funcs_signature") (nil);
-   tConst (MPfile (["Reflection"; "Arith"]), "PA_preds_signature") nil;
-   tVar "D"; tVar "I";
-   tConstruct
-     {|
-     inductive_mind := (MPfile (["Reflection"; "Arith"]), "PA_funcs");
-     inductive_ind := 0 |} 0 nil;
-   tApp
-     (tConstruct
-        {|
-        inductive_mind := (MPfile (["VectorDef"; "Vectors"; "Coq"]), "t");
-        inductive_ind := 0 |} 0 nil) ([tVar "D"])])).
-Notation quoteS x := 
-(tApp (tConst (MPfile (["Tarski"; "Arith"]), "i_f") nil)
-   ([tConst (MPfile (["Reflection"; "Arith"]), "PA_funcs_signature") nil;
-   tConst (MPfile (["Reflection"; "Arith"]), "PA_preds_signature") nil;
-   tVar "D"; tVar "I";
-   tConstruct
-     {|
-     inductive_mind := (MPfile (["Reflection"; "Arith"]), "PA_funcs");
-     inductive_ind := 0 |} 1 nil;
-   tApp
-     (tConstruct
-        {|
-        inductive_mind := (MPfile (["VectorDef"; "Vectors"; "Coq"]), "t");
-        inductive_ind := 0 |} 1 nil)
-     ([tVar "D"; x;
-     tConstruct
-       {|
-       inductive_mind := (MPfile (["Datatypes"; "Init"; "Coq"]), "nat");
-       inductive_ind := 0 |} 0 nil;
-     tApp
-       (tConstruct
-          {|
-          inductive_mind := (MPfile (["VectorDef"; "Vectors"; "Coq"]), "t");
-          inductive_ind := 0 |} 0 nil) ([tVar "D"])])])).
-Notation quoteFalse := 
-(tInd
-   {|
-   inductive_mind := (MPfile (["Logic"; "Init"; "Coq"]), "False");
-   inductive_ind := 0 |} nil).
-Notation quoteAnd x y := 
+Notation vectorCons x T n xr := 
 (tApp
-   (tInd
-      {|
-      inductive_mind := (MPfile (["Logic"; "Init"; "Coq"]), "and");
-      inductive_ind := 0 |} nil)
-   ([x;y])).
-Notation quoteForall x P := (tProd (nNamed x) (tVar "D") P).
-Notation quoteEq x y :=
-(tApp (tConst (MPfile (["Tarski"; "Arith"]), "i_P") nil)
-   ([tConst (MPfile (["Reflection"; "Arith"]), "PA_funcs_signature") nil; tConst (MPfile (["Reflection"; "Arith"]), "PA_preds_signature") nil;
-   tVar "D"; tVar "I"; tConstruct {| inductive_mind := (MPfile (["Reflection"; "Arith"]), "PA_preds"); inductive_ind := 0 |} 0 nil;
-   tApp (tConstruct {| inductive_mind := (MPfile (["VectorDef"; "Vectors"; "Coq"]), "t"); inductive_ind := 0 |} 1 nil)
-     ([tVar "D"; x;
-     tApp (tConstruct {| inductive_mind := (MPfile (["Datatypes"; "Init"; "Coq"]), "nat"); inductive_ind := 0 |} 1 nil)
-       ([tConstruct {| inductive_mind := (MPfile (["Datatypes"; "Init"; "Coq"]), "nat"); inductive_ind := 0 |} 0 nil]);
-     tApp (tConstruct {| inductive_mind := (MPfile (["VectorDef"; "Vectors"; "Coq"]), "t"); inductive_ind := 0 |} 1 nil)
-       ([tVar "D"; y; tConstruct {| inductive_mind := (MPfile (["Datatypes"; "Init"; "Coq"]), "nat"); inductive_ind := 0 |} 0 nil;
-       tApp (tConstruct {| inductive_mind := (MPfile (["VectorDef"; "Vectors"; "Coq"]), "t"); inductive_ind := 0 |} 0 nil) ([tVar "D"])])])])).
-Notation quoteLambda x P := (tLambda (nNamed x) (tVar "D") P).
+ (tConstruct
+    {|
+    inductive_mind := (MPfile (["VectorDef"; "Vectors"; "Coq"]), "t");
+    inductive_ind := 0 |} 1 nil)
+ ([T; x; n; xr])).
+Notation vectorNil T :=
+(tApp
+ (tConstruct
+    {|
+    inductive_mind := (MPfile (["VectorDef"; "Vectors"; "Coq"]), "t");
+    inductive_ind := 0 |} 0 nil) ([T])).
+Notation termConstructorBase l := 
+(tApp (tConst (MPfile (["Tarski"; "Arith"]), "i_f") nil) l).
+Notation propConstructorBase l := 
+(tApp (tConst (MPfile (["Tarski"; "Arith"]), "i_P") nil) l).
+Definition termPropRepStart := 
+   ([tConst (MPfile (["Reflection"; "Arith"]), "PA_funcs_signature") nil;
+   tConst (MPfile (["Reflection"; "Arith"]), "PA_preds_signature") nil; tVar "D"; 
+   tVar "I"]).
+
+Fixpoint recoverVector (f : Ast.term) {struct f}: TemplateMonad (list Ast.term) := let fail := tmPrint f;;tmFail "not a vector application" in match f with
+  vectorNil _ => ret nil
+| vectorCons x _ _ xr => xrl <- recoverVector xr;;ret (x::xrl)
+| _ => fail
+end.
+
+Existing Instance config.default_checker_flags.
+Fixpoint popListStart (l : list Ast.term) (ls : list Ast.term) : option (list Ast.term) := match (l,ls) with
+  (a,nil)=> Some a
+| (lx::lxr, lsx::lsxr) => if Checker.eq_term init_graph lx lsx then popListStart lxr lsxr else None
+| _ => None end.
+
 Definition failEnv (n:nat) : (TemplateMonad term):= tmFail ("Unbound " ++ string_of_nat n).
 Definition relLift (k : TemplateMonad term) : (TemplateMonad term) := kv <- k ;; match kv with var n => ret (var (S n)) | v => ret v end.
 Definition appendZero (k:TemplateMonad term) (v:nat -> TemplateMonad term) (n:nat) := match n with 0 => k | S n => v n end.
 Definition appendAndLift (k:TemplateMonad term) (v:nat -> TemplateMonad term) := appendZero k (v >> relLift).
 
+Definition FUEL := 100.
 
-Fixpoint findTermRepresentation (t:Ast.term) (env:nat->TemplateMonad term) {struct t}: (TemplateMonad term) := let fail :=tmPrint t;;tmFail ("Cannot represent term") in match t with
-  quoteO => ret zero
-| quoteS v => 
-      st <- findTermRepresentation v env;;
-      ret (σ st)
-| tRel k => env k
-| _ => fail
-end.
+Definition termReifier (t:Type) := list Ast.term -> (Ast.term -> TemplateMonad t) -> TemplateMonad t.
+Definition reifyZero : termReifier term := fun l fTR => match l with nil => ret zero | _ => tmFail "Zero constructor applied to != 0 terms" end.
+Definition reifySucc : termReifier term := fun l fTR => match l with [x] => 
+                                           xr <- fTR x ;; ret (σ xr) | _ => tmFail "Succ constructor applied to != 1 terms" end.
+Definition reifyAdd : termReifier term := fun l fTR => match l with [x; y] =>  
+                                           xr <- fTR x ;; yr <- fTR y ;; ret (xr ⊕ yr) | _ => tmFail "Add constructor applied to != 2 terms" end.
+Definition reifyMul : termReifier term := fun l fTR => match l with [x; y] =>  
+                                           xr <- fTR x ;; yr <- fTR y ;; ret (xr ⊗ yr) | _ => tmFail "Mul constructor applied to != 2 terms" end.
+Definition reifyTerm (n:nat) : termReifier term := match n with
+0 => reifyZero | 1 => reifySucc | 2 => reifyAdd | 3 => reifyMul | _ => fun _ _ => tmFail ("Unknown term constructor index " ++ string_of_nat n) end.
 
-Fixpoint findPropRepresentation (t:Ast.term) (frees:nat) (env:nat->TemplateMonad term) {struct t}: (TemplateMonad (form)) := let fail :=tmPrint (frees,t);;tmFail ("Cannot represent form") in 
+
+Notation termRepDet i v := (([tConstruct {| inductive_mind := (MPfile (["Reflection"; "Arith"]), "PA_funcs"); inductive_ind := 0 |}
+     i nil; v])).
+Notation formRepDet i v := (([tConstruct {| inductive_mind := (MPfile (["Reflection"; "Arith"]), "PA_preds"); inductive_ind := 0 |}
+     i nil; v])).
+
+
+Fixpoint findTermRepresentation (fuel:nat) (t:Ast.term) (env:nat->TemplateMonad term) {struct fuel}: (TemplateMonad term) := 
+  let fail :=tmPrint t;;tmFail ("Cannot represent term") in match fuel with 
+    0 => tmFail "Out of fuel" 
+    | S fuel => match t with
+        termConstructorBase l => match popListStart l termPropRepStart with
+          Some (termRepDet i v) => vr <- recoverVector v;;reifyTerm i vr (fun t => findTermRepresentation fuel t env)
+         | _ => fail end
+      | tRel k => env k
+      | _ => fail
+    end 
+  end.
+
+MetaCoq Run (a <- tmQuote (iO i⊕ iσ iO);;t <- findTermRepresentation FUEL a failEnv;;tmPrint t).
+
+Definition envTermReifier (t:Type) := list Ast.term -> nat -> (nat -> TemplateMonad term) -> (Ast.term -> TemplateMonad t) -> TemplateMonad t.
+Definition refiyEq : envTermReifier form := fun l fuel env fPR => match l with [x; y] =>  
+                                           xr <- findTermRepresentation fuel x env ;;
+                                           yr <- findTermRepresentation fuel y env ;; 
+                                           ret (xr == yr) | _ => tmFail "Eq constructor applied to != 2 terms" end.
+Definition reifyForm (n:nat) : envTermReifier form := match n with 0 => refiyEq | _ => fun _ _ _ _ => tmFail ("Unknown form constructor index " ++ string_of_nat n) end.
+
+MetaCoq Test Quote False.
+Notation baseLogicConn x l:= (tInd {| inductive_mind := (MPfile (["Logic"; "Init"; "Coq"]), x); inductive_ind := 0 |} l).
+
+Definition baseConnectiveReifier := list Ast.term -> (nat -> TemplateMonad term) -> (Ast.term -> nat -> (nat -> TemplateMonad term) -> TemplateMonad form)-> TemplateMonad form.
+Definition reifyAnd : baseConnectiveReifier := fun lst env fPR => match lst with [x; y] => 
+                                           xr <- fPR x 0 env;;yr <- fPR y 0 env;; ret (xr ∧ yr) | _ => tmFail "And applied to != 2 terms" end.
+Definition reifyOr  : baseConnectiveReifier := fun lst env fPR => match lst with [x; y] => 
+                                           xr <- fPR x 0 env;;yr <- fPR y 0 env;; ret (xr ∨ yr) | _ => tmFail "Or applied to != 2 terms" end.
+Definition reifyExist:baseConnectiveReifier := fun lst env fPR => match lst with [_; tLambda _ _ x] =>
+                                           rr <- fPR x 0 (appendAndLift (ret (var 0)) env);; ret (∃ rr) | _ => tmFail "Exist applied to wrong terms" end.
+Definition reifyBase (s:string) : baseConnectiveReifier := match s with "and" => reifyAnd | "or" => reifyOr | "ex" => reifyExist | _ => fun _ _ _ => tmFail ("Unknown connective "++s) end.
+
+MetaCoq Test Quote (False).
+MetaCoq Test Quote (and False False).
+MetaCoq Test Quote (or False False).
+MetaCoq Test Quote (False -> False).
+MetaCoq Test Quote (exists (x:D), False).
+MetaCoq Test Quote (forall (x:D), False).
+
+Fixpoint findPropRepresentation (fuel:nat) (t:Ast.term) (frees:nat) (env:nat->TemplateMonad term) {struct fuel}: (TemplateMonad (form)) := 
+let fail :=tmPrint (frees,t);;tmFail ("Cannot represent form") in match fuel with 0 => tmFail "Out of fuel" | S fuel => 
   match (frees,t) with
-  (0,quoteFalse) => ret (fal)
-| (0,quoteAnd x y) => 
-      xr <- findPropRepresentation x 0 env;;
-      yr <- findPropRepresentation y 0 env;;
-      ret ((xr ∧ yr))
-| (0,quoteForall x P) =>
-      rv <- findPropRepresentation P 0 (appendAndLift (ret (var 0)) env);;
+  (0,(baseLogicConn "False" nil)) => ret (fal)
+| (0,(tApp (baseLogicConn name nil) lst)) => reifyBase name lst env (findPropRepresentation fuel)
+| (0,tProd x (tVar "D") P) =>
+      rv <- findPropRepresentation fuel P 0 (appendAndLift (ret (var 0)) env);;
       ret ((∀ rv))
-| (o,tProd _ P Q) =>
-      rP <- findPropRepresentation P 0 env;;
-      rQ <- findPropRepresentation Q 0 (appendZero (tmFail "Used var of implication precondition") env);;
+| (0,tProd _ P Q) =>
+      rP <- findPropRepresentation fuel P 0 env;;
+      rQ <- findPropRepresentation fuel Q 0 (appendZero (tmFail "Used var of implication precondition") env);;
       ret (rP --> rQ)
-| (0,quoteEq tl tr) =>
-      tlr <- findTermRepresentation tl env;;
-      trr <- findTermRepresentation tr env;;
-      ret ((tlr == trr))
-| (S n,quoteLambda x P) => 
-      rv <- findPropRepresentation P n (appendAndLift (ret (var 0)) env);;
+| (0,propConstructorBase l) => match popListStart l termPropRepStart with
+        Some (formRepDet i v) => vr <- recoverVector v;;reifyForm i vr fuel env(fun t => findPropRepresentation fuel t frees env)
+      | _ => fail end
+| (S n,tLambda x (tVar "D") P) => 
+      rv <- findPropRepresentation fuel P n (appendAndLift (ret (var 0)) env);;
       ret (rv)
-| _ => fail
-end.
+| _ => fail end end.
 
 (*MetaCoq  Run (a <- tmQuote (iσ (iσ iO));; k <- findTermRepresentation a;; tmDefinition "res" k).*)
 (*MetaCoq  Run (a <- tmQuote (forall (x:D), x i= x);; k <- findPropRepresentation a failEnv;; tmPrint k).*)
@@ -231,48 +246,14 @@ end.
 
 Ltac represent:= match goal with [ |- representableP ?n ?G ] =>
   let fr := fresh "rep" in let kkk := fresh "sml" in let pr := fresh "denv" in let k y := (pose y as fr) in
-  (run_template_program (g <- (tmQuote G);;findPropRepresentation g n failEnv) k)
+  (run_template_program (g <- (tmQuote G);;findPropRepresentation FUEL g n failEnv) k)
   ;exists fr; pose (fun (_:nat) => iO) as pr; exists pr; split; easy
   end.
 
-Goal (representableP 0 False).
-Proof. 
+Goal (representableP 2 (fun (d e :D) => forall g, exists j, g i= d i⊕ j /\ False -> False \/ (e i⊗ e i= iσ j /\ False))).
 represent.
 Qed.
 
-Goal (representableP 0 (False /\ False -> False)).
-Proof. 
-represent.
-Qed.
-
-Goal (representableP 0 (forall d, False -> iσ d i= iO)).
-Proof. 
-represent. 
-Qed.
-
-Goal (representableP 2 (fun (d e:D) => forall g, g i= d)).
-Proof. 
-represent.
-Qed.
-
-Check well_founded_induction.
-Check List.Forall.
-Structure matchEnviron : Type := {
-target : Type;
-subterm : target -> target -> Prop;
-subterm_wf : well_founded subterm;
-selector : forall t:target, option {l : list (target) & List.Forall (fun k => subterm k t) l};
-
-}.
-
-Lemma foldingForall (P : Prop) phi rho : @representsP 0 phi rho P -> representableP 0 (forall x:D, P).
-intros H. unfold representsP in H. unfold representableP. 
-pose (∀ phi) as kk. exists kk. exists rho. split.
-* intros Hf d. apply H. now apply Hf.
-* intros Hb d. apply H. now apply Hb.
-Qed.
-
-Print k.
   Lemma sat_single (rho : nat -> D) (Phi : form) (t : term) :
     (eval rho t .: rho) ⊨ Phi <-> rho ⊨ subst_form (t..) Phi.
   Proof.
@@ -296,8 +277,8 @@ Print k.
     destruct (AX rho) as (_&_&_&_&_&H). cbn. apply (H phi).
   Qed.
   Theorem PAinduction (P : D -> Prop) :
-    representable 1 P -> P iO -> (forall d, P d -> P (iσ d)) -> forall d, P d.
-    intros (phi & rho & repr) P0 IH. intros d. unfold represents in repr. rewrite repr.
+    representableP 1 P -> P iO -> (forall d, P d -> P (iσ d)) -> forall d, P d.
+    intros (phi & rho & repr) P0 IH. intros d. unfold representsP in repr. rewrite repr.
     apply PAinduction_weak.
     - apply sat_single. apply repr. apply P0.
     - cbn. intros d' H. apply repr, IH, repr in H.
@@ -336,7 +317,7 @@ Print k.
   Goal forall d, iO = d \/ exists x, d = iσ x. 
   Proof.
     enough (forall rho, rho ⊨ (∀ zero == $0 ∨ ∃ $1 == σ $0)) as H. intros d.
-    specialize (H null). cbn in H. specialize (H d). revert H.
+    specialize (H (fun _ => iO)). cbn in H. specialize (H d). revert H.
     rewrite equality. cbn.
     intros [<- | [x H]]. now left. right. rewrite equality in H. now exists x.
     apply zero_or_succ.
@@ -361,7 +342,7 @@ Print k.
     forall d n, n i⊕ (iσ d) = iσ (n i⊕ d).
   Proof.
     intros n. apply PAinduction.
-    - pose (phi := ∀ $1 ⊕ σ $2 == σ ($1 ⊕ $2) ).
+    - represent. pose (phi := ∀ $1 ⊕ σ $2 == σ ($1 ⊕ $2) ).
       exists phi. exists (fun _ => n). intros d. cbn. split.
       + intros H d0. rewrite equality. cbn. easy.
       + intros H. specialize (H n). rewrite equality in H. cbn in H. auto.

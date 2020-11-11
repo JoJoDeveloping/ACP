@@ -34,8 +34,6 @@ nra.cache
 ._*
 nohup.out
 #*#
-Makefile*
-makefile*
 
 # generated timing files
 *.timing.diff
