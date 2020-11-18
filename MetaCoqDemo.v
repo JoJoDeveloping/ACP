@@ -135,7 +135,9 @@ Lemma three : nat. exact (1 + two). Qed.
 MetaCoq Quote Recursively Definition bla := three.
 
 Definition Σ := fst bla.
+
 Compute Σ.
+Check Σ.
 Print add.
 MetaCoq Test Unquote (tConstruct
                                  {|

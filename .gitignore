@@ -20,6 +20,7 @@
 *.vo
 *.vok
 *.vos
+*.crashcoqide
 .coq-native/
 .csdp.cache
 .lia.cache
