@@ -95,7 +95,6 @@ Section Models.
 
   Variable D : Type.
   Context {I : interp D}.
-
   Notation iO := (i_f (f:=Zero) (Vector.nil D)).
   Notation "'iσ' d" := (i_f (f:=Succ) (Vector.cons d (Vector.nil D))) (at level 37).
   Notation "x 'i⊕' y" := (i_f (f:=Plus) (Vector.cons x (Vector.cons y (Vector.nil D)))) (at level 39).
@@ -110,6 +109,12 @@ Section Models.
   Definition representableP (n:nat) (P : naryProp n) := exists phi rho, representsP phi rho P.
   Definition representsF (d:D) trm rho := eval rho trm = d.
   Definition representableF (d:D) := exists trm rho, representsF d trm rho.
+
+  Fixpoint naryFunc (n:nat) : Type := match n with 0 => D | S nn => D -> naryFunc nn end.
+  Fixpoint representsFunc {n:nat} phi rho (res:D) : (forall P:naryFunc n, Prop) := match n return (forall P:naryFunc n, Prop) with
+       0  => fun P:D => @representsP 0 phi (res .: (P .: rho)) (P i= res)
+    | S n => fun P => forall d:D, @representsFunc n phi (d.:rho) res (P d) end.
+  Definition representableFunc {n:nat} rho (f:naryFunc n) (d:D) := {phi:form & @representsFunc n phi rho d f}.
 
   (* Our monad for creating proper error messages *)
   Inductive FailureMonad (A:Type) : Type := ret : A -> FailureMonad A | fail : string -> FailureMonad A.
@@ -192,7 +197,6 @@ Section Models.
   end.
 
 
-
   (* Unquoting PA/specific terms *)
   Notation termConstructorBase := (tConst (MPfile (["Tarski"; "Arith"]), "i_f") nil).
   Notation propConstructorBase := (tConst (MPfile (["Tarski"; "Arith"]), "i_P") nil).
@@ -266,18 +270,29 @@ Section Models.
     Definition qraiseEnvTerm := (tApp (tConst (MPfile (["FOL"; "Arith"]), "scons") nil) ([tVar "D"])). (* Unfolded notation for d .: rho *)
     Definition raiseEnvTerm (d:Ast.term) (env:Ast.term) : Ast.term := tApp (qraiseEnvTerm) ([d;env]).
     (* Reifying PA/specific terms *)
-    Definition envTermReifier := list Ast.term -> nat -> Ast.term -> (Ast.term -> FailureMonad nat) -> (Ast.term -> FailureMonad (prod Ast.term Ast.term)) -> FailureMonad (prod Ast.term Ast.term).
+    Definition formReifier := list Ast.term -> nat -> Ast.term -> (Ast.term -> FailureMonad nat) -> (Ast.term -> FailureMonad (prod Ast.term Ast.term)) -> FailureMonad (prod Ast.term Ast.term).
     Definition mergeEq (rho:nat -> D) (d1 d2 : D) (t1 t2 : term) : representsF d1 t1 rho -> representsF d2 t2 rho -> @representsP 0 (t1==t2) rho (d1 i= d2).
     Proof. intros pt1 pt2.
     cbn. now rewrite pt1, pt2.
     Defined.
     MetaCoq Quote Definition qMergeEq := mergeEq.
     MetaCoq Quote Definition qMergeFormEq := (fun a b => a == b).
-    Definition refiyEq : envTermReifier := fun l fuel envTerm env fPR => match l with [x; y] =>  
+    Definition refiyEq : formReifier := fun l fuel envTerm env fPR => match l with [x; y] =>  
                                                (xr) <- findTermRepresentation fuel x envTerm env ;;
                                                (yr) <- findTermRepresentation fuel y envTerm env ;; let '((xt,xp),(yt,yp)) := (xr,yr) in
                                                ret (tApp qMergeFormEq ([xt;yt]), tApp qMergeEq ([envTerm;x;y;xt;yt;xp;yp])) | _ => fail "Eq constructor applied to != 2 terms" end.
-    Definition reifyForm (n:nat) : envTermReifier := match n with 0 => refiyEq | _ => fun _ _ _ _ _ => fail ("Unknown form constructor index " ++ string_of_nat n) end.
+    Definition reifyForm (n:nat) : formReifier := match n with 0 => refiyEq | _ => fun _ _ _ _ _ => fail ("Unknown form constructor index " ++ string_of_nat n) end.
+    (*
+
+    Class tarski_reflector (funcs:Type) (preds:Type) := {
+      is_reflectable_type : Ast.term -> bool;
+      term_rep_det : Ast.term -> option (prod nat Ast.term);
+      form_rep_det : Ast.term -> option (prod nat Ast.term);
+      rep_start : list Ast.term
+      reify_term : nat -> termReifier;
+      reify_form : nat -> formReifier;
+    }.*)
+
 
     (*Reifying Tarski semantic basic logical connectives *)
 
@@ -288,8 +303,7 @@ Section Models.
 
     Definition mergeAnd (rho:nat -> D) (P Q : naryProp 0) (fP fQ : form) : representsP fP rho P -> representsP fQ rho Q -> @representsP 0 (fP∧fQ) rho (P /\ Q).
     Proof.
-    intros HP HQ.
-    destruct HP as [pPl pPr]. destruct HQ as [pQl pQr]. split.
+    intros [pPl pPr] [pQl pQr]. split.
     * intros [pP pQ]. split. now apply pPl. now apply pQl.
     * intros [pP pQ]. split. now apply pPr. now apply pQr.
     Defined.
@@ -298,8 +312,7 @@ Section Models.
 
     Definition mergeOr (rho:nat -> D) (P Q : naryProp 0) (fP fQ : form) : representsP fP rho P -> representsP fQ rho Q -> @representsP 0 (fP∨fQ) rho (P \/ Q).
     Proof.
-    intros HP HQ.
-    destruct HP as [pPl pPr]. destruct HQ as [pQl pQr]. split.
+    intros [pPl pPr] [pQl pQr]. split.
     * intros [pP|pQ]. left; now apply pPl. right; now apply pQl.
     * intros [pP|pQ]. left; now apply pPr. right; now apply pQr.
     Defined.
@@ -351,9 +364,8 @@ Section Models.
     MetaCoq Quote Definition qMergeFormImpl := (fun p q => p --> q).
 
     Definition mergeForall (rho:nat -> D) (Q:naryProp 1) (phi:form) : representsP phi rho Q -> @representsP 0 (∀ phi) rho (forall x:D, Q x).
-    Proof. intros H. cbn. split.
-    * intros HH d. specialize (HH d). specialize (H d). cbn in H. apply H, HH.
-    * intros HH d. specialize (HH d). specialize (H d). cbn in H. apply H, HH.
+    Proof. intros H. cbn. split;
+     intros HH d; specialize (HH d); specialize (H d); cbn in H; apply H, HH.
     Defined.
     MetaCoq Quote Definition qMergeForall := mergeForall.
     MetaCoq Quote Definition qMergeFormForall := (fun k => ∀ k).
@@ -411,7 +423,11 @@ Section Models.
   Goal (representableP 2 (fun a b  => a i= b)).
   Time represent. 
   Qed.
-
+MetaCoq Test Quote (iO).
+Compute (iO).
+MetaCoq Quote Definition stuff := Eval compute in (iO).
+Print stuff.
+Print tApp.
 
   Goal (representableP 2 (fun (d e :D) => forall g, exists j, g i= d i⊕ j /\ False -> False \/ (e i⊗ iO i= iσ j /\ False))).
   Time represent.
@@ -464,6 +480,9 @@ Section Models.
   * cbn. exists zero. pose (fun (n:nat) => iO). exists d. split.
   * cbn. unfold representableF. pose (σ phi). exists t. exists rho. unfold representsF. unfold representsF in IH. unfold t. cbn. now rewrite IH.
   Qed.
+Check representableFunc.
+Print representableFunc.
+Goal (@representableFunc 2 (fun _:nat => iO) (fun a b => a i⊕ b) iO).
 
 (* Leftovers from old file *)
 
