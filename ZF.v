@@ -169,13 +169,14 @@ Section ZF.
   MetaCoq Quote Definition qVM := (@V M).
   Existing Instance config.default_checker_flags.
   Instance ZF_reflector : tarski_reflector := {
-    fs := ZF_func_sig;
-    ps := ZF_pred_sig;
-    D := @V M;
-    I := @VI M;
+    fs := _;
+    ps := _;
+    D := _;
+    I := _;
     emptyEnv := (fun _:nat => i∅);
     isD := Checker.eq_term uGraph.init_graph qVM
   }.
+  Print ZF_reflector.
 
   Hypothesis VIEQ : extensional M.
   
@@ -243,8 +244,8 @@ Section ZF.
   Definition representable__rel phi (R : M -> M -> Prop) :=
     forall x y rho, R x y <-> (x.:(y.:rho)) ⊨ phi.
 
-  Definition def_rel (R : M -> M -> Prop) :=
-    exists phi rho, forall x y, R x y <-> (x.:(y.:rho)) ⊨ phi.
+  Notation def_rel R := (representableP 2 R).
+    (*exists phi rho, forall x y, R x y <-> (x.:(y.:rho)) ⊨ phi.*)
 
   Definition M_is_rep R x y :=
     forall v, v i∈ y <-> exists u, u i∈ x /\ R u v.
@@ -262,7 +263,7 @@ Section ZF.
     - intros H % H2. now apply H1.
   Qed.
   
-  Goal representableP 2 (fun x y => x i⊆ y).
+  Goal def_rel (fun x y => x i⊆ y).
   representNP.
   Qed.
 

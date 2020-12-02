@@ -60,7 +60,6 @@ Notation "x '⊗' y" := (func Mult (Vector.cons x (Vector.cons y (Vector.nil ter
 Notation "x '==' y" := (atom Eq (Vector.cons term x 1 (Vector.cons term y 0 (Vector.nil term))) ) (at level 40).
 
 
-
 Fixpoint num n :=
   match n with
     O => zero
@@ -111,13 +110,14 @@ Section Models.
   Variable D' : Type.
   Context {I : interp D'}.
   Instance PA_reflector : tarski_reflector := {
-    fs := PA_funcs_signature;
-    ps := PA_preds_signature;
-    D := D';
-    I := I;
+    fs := _;
+    ps := _;
+    D := _;
+    I := _;
     emptyEnv := (fun _:nat => (i_f (f:=Zero) (Vector.nil D')));
     isD := fun k => match k with (tVar "D'") => true | _ => false end
   }.
+  
   
 
   Definition Equality := forall v, @i_P _ _ D I Eq v <-> Vector.hd v = Vector.hd (Vector.tl v). 
@@ -164,7 +164,7 @@ Section Models.
   Goal (representableP 0 (iO i= iO)).
   Time represent.
   Qed.
-  Goal (representableP 0 (forall d, d i= iO)).
+  Goal (representableP 0 (forall d:D', d i= iO)).
   Time represent.
   Qed.
   Goal (representableP 2 (fun a b => a i= b)).
@@ -260,8 +260,8 @@ Section Models.
   Time representNP.
   Time Qed.
 
-  Goal forall d:D, representableP 0 (d i= iO).
-  intros d. Fail represent. 
+  Goal forall (d e:D), representableP 0 (d i= e).
+  intros d e. Fail represent. 
   constructEnv. 
   representEnvP (Some envBase) envTerm.
   Qed.

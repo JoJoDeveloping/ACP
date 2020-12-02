@@ -460,7 +460,7 @@ Ltac represent := match goal with [ |- @representableP ?i ?n ?G ] => representEn
 Ltac representNP := match goal with [ |- @representableP ?i ?n ?G ] => representEnvPNP (@None(nat -> @D i)) unboundEnv end.
 
 Ltac constructEnv := 
-match goal with [ |- @representableP ?i ?n ?G ] =>
+match goal with [ |- @representableP ?i ?n ?G ] => (*(pose (fst y) as envBase;pose (snd y) as envTerm*)
   let envBase := fresh "envBase" in let envTerm := fresh "envTerm" in let k y := (pose (fst y) as envBase;pose (snd y) as envTerm) in
   (run_template_program (monad_utils.bind (tmQuote i) (fun tct =>
                          monad_utils.bind (tmQuote G) (fun g => 
