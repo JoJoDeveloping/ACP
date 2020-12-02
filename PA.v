@@ -1,10 +1,20 @@
+Require Import MetaCoq.Checker.Checker.
+From MetaCoq.Template Require Import utils All Pretty.
+Require Import List String.
+Import MonadNotation.
 Require Import FOL.
 Require Import Deduction.
 Require Import Tarski.
 Require Import VectorTech.
-Require Import List.
 Require Import Lia.
 
+(*Require Import FOL.
+Require Import Deduction.
+Require Import Tarski.
+Require Import VectorTech.
+Require Import List.
+Require Import Lia.*)
+Require Import GeneralReflection.
 (* I follow the treatment of Peter Smith in "Introduction to Gödel's Theorems"
  (page 37) *)
 
@@ -98,11 +108,17 @@ Qed.
 Section Models.                                              
   
 
-  Variable D : Type.
-  Context {I : interp D}.
-Print interp.
-
-Goal interp D. exact _. Qed.
+  Variable D' : Type.
+  Context {I : interp D'}.
+  Instance PA_reflector : tarski_reflector := {
+    fs := PA_funcs_signature;
+    ps := PA_preds_signature;
+    D := D';
+    I := I;
+    emptyEnv := (fun _:nat => (i_f (f:=Zero) (Vector.nil D')));
+    isD := fun k => match k with (tVar "D'") => true | _ => false end
+  }.
+  
 
   Definition Equality := forall v, @i_P _ _ D I Eq v <-> Vector.hd v = Vector.hd (Vector.tl v). 
   Hypothesis equality : forall v, @i_P _ _ D I Eq v <-> Vector.hd v = Vector.hd (Vector.tl v).
@@ -134,11 +150,121 @@ Goal interp D. exact _. Qed.
     intros rho a b c. cbn. rewrite !equality. cbn. intros [C B]. now rewrite C, B.
   Qed.
 
-  Definition iO := i_f (f:=Zero) (Vector.nil D).
+  Notation iO := (i_f (f:=Zero) (Vector.nil D)).
   Notation "'iσ' d" := (i_f (f:=Succ) (Vector.cons d (Vector.nil D))) (at level 37).
   Notation "x 'i⊕' y" := (i_f (f:=Plus) (Vector.cons x (Vector.cons y (Vector.nil D)))) (at level 39).
   Notation "x 'i⊗' y" := (i_f (f:=Mult) (Vector.cons x (Vector.cons y (Vector.nil D)))) (at level 38).
+  Notation "x 'i=' y" := (i_P (P:=Eq) (Vector.cons x (Vector.cons y (Vector.nil D)))) (at level 40).
   Definition iμ k := iter (fun x => iσ x) k iO.
+
+
+  
+
+  (* Test cases *)
+  Goal (representableP 0 (iO i= iO)).
+  Time represent.
+  Qed.
+  Goal (representableP 0 (forall d, d i= iO)).
+  Time represent.
+  Qed.
+  Goal (representableP 2 (fun a b => a i= b)).
+  Time represent. 
+  Qed.
+  Goal (representableP 2 (fun (d e :D) => forall g, exists j, g i= d i⊕ j /\ False -> False \/ (e i⊗ iO i= iσ j /\ False))).
+  Time represent.
+  Qed.
+  Goal (representableP 0 (forall a b, a i= b)).
+  Time represent. 
+  Time Qed.
+  Goal (representableP 0 (forall a b c, a i= b i⊕ c)).
+  Time represent.
+  Time Qed.
+  Goal (representableP 0 (forall a b c d ,a i= b i⊕ c i⊕ d)).
+  Time represent. 
+  Time Qed.
+  Goal (representableP 0 (forall a b c d e , a i= b i⊕ c i⊕ d i⊕ e)).
+  Time represent. 
+  Time Qed.
+  Goal (representableP 0 (forall a b c d e f , a i= b i⊕ c i⊕ d i⊕ e i⊕ f)).
+  Time represent. 
+  Time Qed.
+  Goal (representableP 0 (forall a b c d e f g , a i= b i⊕ c i⊕ d i⊕ e i⊕ f i⊕ g)).
+  Time represent.
+  Time Qed.
+  Goal (representableP 2 (fun a b=> a i= b)).
+  Time represent. 
+  Time Qed.
+  Goal (representableP 3 (fun a b c=> a i= b i⊕ c)).
+  Time represent.
+  Time Qed.
+  Goal (representableP 4 (fun a b c d =>a i= b i⊕ c i⊕ d)).
+  Time represent. 
+  Time Qed.
+  Goal (representableP 5 (fun a b c d e => a i= b i⊕ c i⊕ d i⊕ e)).
+  Time represent. 
+  Time Qed.
+  Goal (representableP 6 (fun a b c d e f => a i= b i⊕ c i⊕ d i⊕ e i⊕ f)).
+  Time represent. 
+  Time Qed.
+  Goal (representableP 7 (fun a b c d e f g => a i= b i⊕ c i⊕ d i⊕ e i⊕ f i⊕ g)).
+  Time represent.
+  Time Qed.
+
+  (* Test cases NP*)
+  Goal (representableP 0 (iO i= iO)).
+  Time representNP.
+  Qed.
+  Goal (representableP 0 (forall d, d i= iO)).
+  Time representNP.
+  Qed.
+  Goal (representableP 2 (fun a b => a i= b)).
+  Time representNP. 
+  Qed.
+  Goal (representableP 2 (fun (d e :D) => forall g, exists j, g i= d i⊕ j /\ False -> False \/ (e i⊗ iO i= iσ j /\ False))).
+  Time representNP.
+  Qed.
+  Goal (representableP 0 (forall a b, a i= b)).
+  Time representNP. 
+  Time Qed.
+  Goal (representableP 0 (forall a b c, a i= b i⊕ c)).
+  Time representNP.
+  Time Qed.
+  Goal (representableP 0 (forall a b c d ,a i= b i⊕ c i⊕ d)).
+  Time representNP. 
+  Time Qed.
+  Goal (representableP 0 (forall a b c d e , a i= b i⊕ c i⊕ d i⊕ e)).
+  Time representNP. 
+  Time Qed.
+  Goal (representableP 0 (forall a b c d e f , a i= b i⊕ c i⊕ d i⊕ e i⊕ f)).
+  Time representNP. 
+  Time Qed.
+  Goal (representableP 0 (forall a b c d e f g , a i= b i⊕ c i⊕ d i⊕ e i⊕ f i⊕ g)).
+  Time representNP.
+  Time Qed.
+  Goal (representableP 2 (fun a b=> a i= b)).
+  Time representNP. 
+  Time Qed.
+  Goal (representableP 3 (fun a b c=> a i= b i⊕ c)).
+  Time representNP.
+  Time Qed.
+  Goal (representableP 4 (fun a b c d =>a i= b i⊕ c i⊕ d)).
+  Time representNP. 
+  Time Qed.
+  Goal (representableP 5 (fun a b c d e => a i= b i⊕ c i⊕ d i⊕ e)).
+  Time representNP. 
+  Time Qed.
+  Goal (representableP 6 (fun a b c d e f => a i= b i⊕ c i⊕ d i⊕ e i⊕ f)).
+  Time representNP. 
+  Time Qed.
+  Goal (representableP 7 (fun a b c d e f g => a i= b i⊕ c i⊕ d i⊕ e i⊕ f i⊕ g)).
+  Time representNP.
+  Time Qed.
+
+  Goal forall d:D, representableP 0 (d i= iO).
+  intros d. Fail represent. 
+  constructEnv. 
+  representEnvP (Some envBase) envTerm.
+  Qed.
 
 
 

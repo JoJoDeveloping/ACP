@@ -35,7 +35,9 @@ Definition PA_preds_ar (P : PA_preds) :=
 match P with
  | Eq => 2
 end.
-
+Search reductionStrategy.
+Print reductionStrategy.
+Print TemplateMonad.
 
 Instance PA_funcs_signature : funcs_signature :=
 {| syms := PA_funcs ; ar_syms := PA_funcs_ar |}.
@@ -111,6 +113,7 @@ Section Models.
   Definition representableF (d:D) := exists trm rho, representsF d trm rho.
 
   Fixpoint naryFunc (n:nat) : Type := match n with 0 => D | S nn => D -> naryFunc nn end.
+
   Fixpoint representsFunc {n:nat} phi rho (res:D) : (forall P:naryFunc n, Prop) := match n return (forall P:naryFunc n, Prop) with
        0  => fun P:D => @representsP 0 phi (res .: (P .: rho)) (P i= res)
     | S n => fun P => forall d:D, @representsFunc n phi (d.:rho) res (P d) end.
@@ -209,6 +212,33 @@ Section Models.
      tConst (MPfile (["Reflection"; "Arith"]), "PA_preds_signature") nil; tVar "D"; 
      tVar "I"]).
   MetaCoq Quote Definition domainType := D.
+  Fixpoint naryGFunc {n:nat} (A R : Type) := match n with 0 => R | S n => A -> @naryGFunc n A R end.
+  Fixpoint takeMultiple {n : nat} (X Y:Type)  : (Vector.t X n -> Y) -> @naryGFunc n X Y := 
+     match n as nn return (Vector.t X nn -> Y) -> @naryGFunc nn X Y
+             with 0 => fun R => R (Vector.nil X) 
+              | S n => fun R v => @takeMultiple n X Y (fun vr => R (Vector.cons X v n vr)) end.
+  Definition constructTerm (k:PA_funcs) := @takeMultiple (PA_funcs_ar k) term term (func k).
+  Definition constructForm (k:PA_preds) := @takeMultiple (PA_preds_ar k) term form (atom k).
+  Fixpoint nary3GFunc (n:nat) (A B A' B':Type) (C:A -> B -> Type) (C':A'->B'->Type) : (Vector.t A n -> A') -> (Vector.t B n -> B') -> Type
+                      := match n with 0 => fun mA mB => C' (mA (Vector.nil A)) (mB (Vector.nil B))
+                                  | S n => fun mA mB => forall (a:A) (b:B), C a b -> @nary3GFunc n A B A' B' C C' (fun v => mA (Vector.cons A a n v)) (fun v => mB (Vector.cons B b n v)) end.
+  Definition mergeFormBase (c:PA_funcs) : Type := forall (rho:nat -> D), @nary3GFunc (PA_funcs_ar c) term D term D (fun t d => representsF d t rho) (fun t d => representsF d t rho) (func c) (i_f (f:=c)).
+  Definition mergeFormProto (rho:nat -> D) (n:nat) (fZ:vec term n -> term) (ifZ : vec D n -> D) := (forall v : vec term n, eval rho (fZ v) = ifZ (Vector.map (eval rho) v)) -> @nary3GFunc n term D term D (fun t d => representsF d t rho) (fun t d => representsF d t rho) fZ ifZ.
+  Definition mergeFormProof (rho:nat -> D) (n:nat) (fZ:vec term n -> term) (ifZ : vec D n -> D) : mergeFormProto rho n fZ ifZ.
+  Proof.
+  intros H. induction n as [|n IH].
+  * cbn. unfold representsF. rewrite H. cbn. easy.
+  * cbn. intros t d r. apply IH. cbn. intros v. specialize (H (Vector.cons t v)). unfold representsF in r. rewrite H. cbn. now rewrite r.
+  Defined.
+Print mergeFormBase.
+  Definition mergeForm (c:PA_funcs) : mergeFormBase c.
+  Proof. unfold mergeFormBase. intros rho. eapply mergeFormProof. intros v. easy. Defined.
+
+(*
+  Definition mergeZero : mergeFormBase Zero. easy. Defined.
+  Definition mergeSucc : mergeFormBase Succ. intros ro ta da pa. cbn. unfold representsF. cbn. unfold representsF in pa. now rewrite pa. Defined.
+  Definition mergePlus : mergeFormBase Plus. intros ro ta da pa tb db pb. cbn. unfold representsF. cbn. now rewrite pa, pb. Defined.
+*)
 
   (* Reifying terms *)
   Definition mergeZero (rho:nat -> D) : representsF (iO) zero rho.
@@ -218,7 +248,7 @@ Section Models.
 
   Definition mergeSucc (rho:nat -> D) (d:D) (phi:term) : representsF d phi rho -> representsF (iσ d) (σ phi) rho.
   Proof. intros pt.
-  unfold representsF. cbn. now rewrite pt.
+  unfold representsF. cbn. unfold representsF in pt. now rewrite pt.
   Defined.
   MetaCoq Quote Definition qMergeSucc := mergeSucc.
   MetaCoq Quote Definition qMergeSuccTerm := (fun k => σ k).
@@ -300,6 +330,7 @@ Section Models.
     Proof. easy. Defined.
     MetaCoq Quote Definition qMergeFalse := mergeFalse.
     MetaCoq Quote Definition qMergeFormFalse := fal.
+ 
 
     Definition mergeAnd (rho:nat -> D) (P Q : naryProp 0) (fP fQ : form) : representsP fP rho P -> representsP fQ rho Q -> @representsP 0 (fP∧fQ) rho (P /\ Q).
     Proof.
@@ -411,6 +442,9 @@ Section Models.
   end.
   Ltac represent := representEnv (fun k:nat => iO) (fun (v:Ast.term) => @fail nat "unbound").
 
+Goal (forall n, representableP 0 (forall m:D, n i= m)).
+intros n. representEnv (fun k:nat => n) (fun p => match p with tVar "n" => ret 3 | _ => fail "unbound" end). Show Proof. Qed.
+
   (* Test cases *)
   Goal (representableP 0 (iO i= iO)).
   Time represent.
@@ -423,15 +457,9 @@ Section Models.
   Goal (representableP 2 (fun a b  => a i= b)).
   Time represent. 
   Qed.
-MetaCoq Test Quote (iO).
-Compute (iO).
-MetaCoq Quote Definition stuff := Eval compute in (iO).
-Print stuff.
-Print tApp.
 
   Goal (representableP 2 (fun (d e :D) => forall g, exists j, g i= d i⊕ j /\ False -> False \/ (e i⊗ iO i= iσ j /\ False))).
   Time represent.
-  Show Proof.
   Qed.
   Goal (representableP 0 (forall a b, a i= b)).
   Time represent. 
@@ -449,7 +477,7 @@ Print tApp.
   Time represent. 
   Time Qed.
   Goal (representableP 0 (forall a b c d e f g , a i= b i⊕ c i⊕ d i⊕ e i⊕ f i⊕ g)).
-  Time represent. Show Proof.
+  Time represent.
   Time Qed.
 
   Goal (representableP 2 (fun a b=> a i= b)).
@@ -468,7 +496,7 @@ Print tApp.
   Time represent. 
   Time Qed.
   Goal (representableP 7 (fun a b c d e f g => a i= b i⊕ c i⊕ d i⊕ e i⊕ f i⊕ g)).
-  Time represent. Show Proof.
+  Time represent.
   Time Qed.
 
   Goal forall n m:D, (representableP 0 (n i= m)).
