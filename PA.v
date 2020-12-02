@@ -109,20 +109,19 @@ Section Models.
 
   Variable D' : Type.
   Context {I : interp D'}.
+  (*Instance PA_reflector : tarski_reflector := buildDefaultTarski (i_f (f:=Zero) (Vector.nil D')) (fun k => match k with (tVar "D'") => true | _ => false end)*)
+ 
+  
+  
+
+  Definition Equality := forall v, @i_P _ _ D' I Eq v <-> Vector.hd v = Vector.hd (Vector.tl v). 
+  Hypothesis equality : forall v, @i_P _ _ D' I Eq v <-> Vector.hd v = Vector.hd (Vector.tl v).
+
+
   Instance PA_reflector : tarski_reflector := {
-    fs := _;
-    ps := _;
-    D := _;
-    I := _;
     emptyEnv := (fun _:nat => (i_f (f:=Zero) (Vector.nil D')));
-    isD := fun k => match k with (tVar "D'") => true | _ => false end
+    isD := (fun k => match k with (tVar "D'") => true | _ => false end);
   }.
-  
-  
-
-  Definition Equality := forall v, @i_P _ _ D I Eq v <-> Vector.hd v = Vector.hd (Vector.tl v). 
-  Hypothesis equality : forall v, @i_P _ _ D I Eq v <-> Vector.hd v = Vector.hd (Vector.tl v).
-
   (* The following predicate expresses that a model satisfies the minimal axioms of PA i.e. all axioms except S x <> 0 *)
   Definition sat_PA_minimal_axioms :=
     forall rho,
@@ -157,9 +156,29 @@ Section Models.
   Notation "x 'i=' y" := (i_P (P:=Eq) (Vector.cons x (Vector.cons y (Vector.nil D)))) (at level 40).
   Definition iμ k := iter (fun x => iσ x) k iO.
 
-
-  
-
+  Section ReflectionExtension.
+    Definition mergeEqProp (rho:nat -> D) (d1 d2 : D) (t1 t2 : term) : representsF d1 t1 rho -> representsF d2 t2 rho -> @representsP _ 0 (t1==t2) rho (d1 = d2).
+    Proof. intros pt1 pt2. cbn. unfold representsF in pt1, pt2. cbn in pt1, pt2. rewrite pt1, pt2. specialize (equality (Vector.cons d1 (Vector.cons d2 (Vector.nil D')))). cbn in equality. easy.
+    Defined.
+    Definition mEq := (constructForm Eq).
+    MetaCoq Quote Definition qMergeFormEq := @mEq.
+    MetaCoq Quote Definition qMergeEqProp := mergeEqProp.
+    Definition reifyCoqEq : baseConnectiveReifier := fun tct l fuel envTerm env fPR => match l with [tv; x; y] => if maybeD tct tv then
+                                               xr <- findTermRepresentation tct fuel x envTerm env ;;
+                                               yr<-  findTermRepresentation tct fuel y envTerm env ;; let '((xt,xp),(yt,yp)) := (xr,yr) in
+                                               ret (tApp qMergeFormEq ([xt;yt]), tApp qMergeEqProp ([envTerm;x;y;xt;yt;xp;yp])) else fail "Eq applied to wrong type" | _ => fail "Eq constructor applied to != 2 terms" end.
+    Definition varsCoqEq : baseUBVarFinder := fun lst fuel tct _ => match lst with [tv; x; y] => if maybeD tct tv then
+                                               xr <- findUnboundVariablesTerm fuel x;;
+                                               yr <- findUnboundVariablesTerm fuel y;;
+                                               ret (xr++yr) else fail "Eq applied to wrong type" | _ => fail "Eq constructor applied to != 2 terms" end.
+    Definition reifyBLC (s:string) : baseConnectiveReifier := match s with "eq" => reifyCoqEq | _ => fun _ _ _ _ _ _ => fail ("Unknown connective " ++ s) end.
+    Definition varsBLC (s:string) : baseUBVarFinder := match s with "eq" => varsCoqEq | _ => fun _ _ _ _ => fail ("Unknown connective " ++ s) end.
+  End ReflectionExtension.
+  Instance PA_reflector_ext : tarski_reflector_extensions PA_reflector := {| (*Cannot define instance in section because they are dropped afterwards *)
+    baseLogicConnHelper := Some (reifyBLC);
+    baseLogicVarHelper := Some (varsBLC)
+  |}.
+ 
   (* Test cases *)
   Goal (representableP 0 (iO i= iO)).
   Time represent.
@@ -261,9 +280,11 @@ Section Models.
   Time Qed.
 
   Goal forall (d e:D), representableP 0 (d i= e).
-  intros d e. Fail represent. 
-  constructEnv. 
-  representEnvP (Some envBase) envTerm.
+  intros d e. representNP.
+  Qed.
+
+  Goal forall (d e:D), representableP 0 (d = e).
+  intros d e. Fail representNP; easy. represent.
   Qed.
 
 
@@ -317,7 +338,7 @@ Section Models.
   
   
   Definition null := (fun _ : nat => iO).
-  Definition representable (P : D -> Prop) := exists phi rho, forall d, P d <-> (d.:rho) ⊨ phi.
+  Notation representable P := (representableP 1 P). (*exists phi rho, forall d, P d <-> (d.:rho) ⊨ phi.*)
 
   Lemma sat_single (rho : nat -> D) (Phi : form) (t : term) :
     (eval rho t .: rho) ⊨ Phi <-> rho ⊨ subst_form (t..) Phi.
@@ -330,7 +351,7 @@ Section Models.
   Theorem PAinduction (P : D -> Prop) :
     representable P -> P iO -> (forall d, P d -> P (iσ d)) -> forall d, P d.
   Proof.
-    intros (phi & rho & repr) P0 IH. intros d. rewrite repr.
+    intros (phi & rho & repr) P0 IH. intros d. unfold representsP in repr. rewrite repr.
     apply PAinduction_weak.
     - apply sat_single. apply repr. apply P0.
     - cbn. intros d' H. apply repr, IH, repr in H.
@@ -377,29 +398,18 @@ Section Models.
 
   Goal forall d, iO = d \/ exists x, d = iσ x. 
   Proof.
-    apply PAinduction.
-    pose (phi := zero == $0 ∨ ∃ $1 == σ $0).
-    - exists phi, (fun _ => iO). split.
-      + intros [<- | [x ->]].
-        * left. cbn. now rewrite equality.
-        * right. exists x. cbn. now rewrite equality.
-      + intros [H | [x H]].
-        * left. cbn in H. now rewrite equality in H.
-        * right. exists x. cbn in H. now rewrite equality in H.
+    apply PAinduction. represent.
     - now left.
-    - intros d [<- |]; right. now exists iO. now exists d.
+    - intros d [<- |]; right. pose iO. now exists d. now exists d.
   Qed.
 
   Lemma add_rec_right :
     forall d n, n i⊕ (iσ d) = iσ (n i⊕ d).
   Proof.
     intros n. apply PAinduction.
-    - pose (phi := ∀ $1 ⊕ σ $2 == σ ($1 ⊕ $2) ).
-      exists phi. exists (fun _ => n). intros d. cbn. split.
-      + intros H d0. rewrite equality. cbn. easy.
-      + intros H. specialize (H n). rewrite equality in H. cbn in H. auto.
+    - represent. 
     - rewrite !add_zero; try reflexivity. all: firstorder.
-    - intros d IH. rewrite !add_rec. now rewrite IH. all: firstorder.
+    - intros d IH. rewrite !add_rec. cbn in IH. cbn. now rewrite IH. all: firstorder.
   Qed.
     
   
@@ -418,11 +428,8 @@ Section Models.
     
     Fact ModelHasOnlyZero : forall d, d = iO.
     Proof.
-      apply PAinduction.
-      pose (phi := $0 == zero).
-      - exists phi, (fun _ => iO). split.
-        + intros ->. cbn. now rewrite equality.
-        + intros H. cbn in H. now rewrite equality in H.
+      apply PAinduction. 
+      - represent.
       - reflexivity.
       - intros d. now intros ->.
     Qed.
