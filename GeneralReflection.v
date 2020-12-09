@@ -9,19 +9,24 @@ Require Import VectorTech.
 Require Import Lia.
 
 Section FailureMonad.
-  (* Our monad for creating proper error messages *)
+  (* Our monad for creating proper error messages. *)
   Inductive FailureMonad (A:Type) : Type := ret : A -> FailureMonad A | fail : string -> FailureMonad A.
   Arguments ret {_} _.
   Arguments fail {_} _.
   Definition bind {A B : Type} (k:FailureMonad A) (f:A -> FailureMonad B) := match k return FailureMonad B with fail x => fail x | ret k => f k end.
   Notation "x <- c1 ;; c2" := (bind c1 (fun x => c2)).
+  (* "Converts" from our monad to the TemplateMonad of MetaCoq. This is used to pass error messages back to the user *)
   Definition f2t {T:Type} (a:FailureMonad T) : TemplateMonad T := match a with ret k => monad_utils.ret k | fail s => tmFail s end.
+  (* Structurally recursive definition of a monadic map *)
   Fixpoint flatten_monad {A:Type} (l:list (FailureMonad A)) : FailureMonad (list A) := match l with nil => ret nil | x::xr => xm <- x;; xrm <- flatten_monad xr;; ret (xm::xrm) end.
   Definition map_monad {A B:Type} (f:A -> FailureMonad B) (l:list A) : FailureMonad (list B) := flatten_monad (map f l).
+  (* If the first monad fails, use the second. Used to cascade failure handling *)
+  Definition orelse {A:Type} (F1 F2 :FailureMonad A) := match F1 with fail _ => F2 | _ => F1 end.
 End FailureMonad.
 
 Arguments ret {_} _.
 Arguments fail {_} _.
+Arguments orelse {_} _ _.
 Notation "x <- c1 ;; c2" := (bind c1 (fun x => c2)).
 Arguments Vector.cons {_} _ {_} _, _ _ _ _.
 
@@ -40,6 +45,7 @@ Section MetaCoqUtils.
       {|
       inductive_mind := (MPfile (["VectorDef"; "Vectors"; "Coq"]), "t");
       inductive_ind := 0 |} 0 nil) ([T])).
+  (* Unquotes a vector (into a list) *)
   Fixpoint recoverVector (f : Ast.term) {struct f}: FailureMonad (list Ast.term) := let ffail := fail "not a vector application" in match f with
     vectorNil _ => ret nil
   | vectorCons x _ _ xr => xrl <- recoverVector xr;;ret (x::xrl)
@@ -47,11 +53,13 @@ Section MetaCoqUtils.
   end.
 
   (* General utils for quoted terms *)
+  (* Remove the n first elements from a list *)
   Existing Instance config.default_checker_flags.
   Fixpoint popNElements (l : list Ast.term) (n:nat) : option (list Ast.term) := match (l,n) with
     (a,0) => Some a
   | (x::xr, S n) => popNElements xr n
   | _ => None end.
+  (* If ls is a valid prefix of l, return the corresponding "suffix" (the remaining elements of l). Otherwise, return None *)
   Fixpoint popListStart (l : list Ast.term) (ls : list Ast.term) : option (list Ast.term) := match (l,ls) with
     (a,nil)=> Some a
   | (lx::lxr, lsx::lsxr) => if Checker.eq_term init_graph lx lsx then popListStart lxr lsxr else None
@@ -59,8 +67,10 @@ Section MetaCoqUtils.
   MetaCoq Quote Definition qNatZero := 0.
   MetaCoq Quote Definition qNatSucc := S.
   MetaCoq Quote Definition qeq_refl := (@eq_refl).
+  (* Given n, yield a MetaCoq Ast.term representation of n *)
   Fixpoint quoteNumber (n:nat) : Ast.term:= match n with 0 => qNatZero | S n => tApp qNatSucc ([quoteNumber n]) end.
 
+  (* Increases the indices of all tRel in t by amnt, assuming they are already larger than minn. If minn = 0, this increases all "free" tRel reference indices *)
   Fixpoint addRelIndex (minn:nat) (amnt:nat) (t:Ast.term) : Ast.term := match t with
     tRel n => if Compare_dec.le_gt_dec minn n then tRel (amnt+n) else tRel n
   | tVar k => tVar k
@@ -81,6 +91,7 @@ Section MetaCoqUtils.
   end.
   Definition map_def_monad {A B : Type} (tyf bodyf : A -> FailureMonad B) (d:def A) : FailureMonad (def B) := dtr <- tyf (dbody d);;dbr <- bodyf (dbody d);; 
                                                                                                             ret {| dname := dname d; dtype := dtr; dbody := dbr; rarg := rarg d |}.
+  (* Inverse operation to addRelIndex. Can fail, if the term for instance contains a tRel 0, which would need to be lowered to tRel (-1), which does not exist *)
   Fixpoint lowerRelIndex (minn:nat) (tv:FailureMonad Ast.term) (t:Ast.term) {struct t}: FailureMonad Ast.term := match t with
     tRel n => if Compare_dec.le_gt_dec minn n then if Compare_dec.le_gt_dec minn (S n) then ret (tRel (match n with 0 => 0 | S n => n end)) else tv else ret (tRel n)
   | tVar k => ret (tVar k)
@@ -102,25 +113,47 @@ Section MetaCoqUtils.
 End MetaCoqUtils.
 
 Section AbstractReflectionDefinitions.
-  Definition baseConnectiveReifier := Ast.term -> list Ast.term -> nat -> Ast.term -> (Ast.term -> FailureMonad nat) -> (Ast.term -> nat -> Ast.term -> (Ast.term -> FailureMonad nat) -> FailureMonad (prod Ast.term Ast.term))-> FailureMonad (prod Ast.term Ast.term).
-  Definition baseUBVarFinder := list Ast.term -> nat -> Ast.term -> (Ast.term->nat->FailureMonad (list Ast.term)) -> FailureMonad (list Ast.term).
+  (* Types used for extension points *)
+  Definition helperTermReifierType := (Ast.term -> Ast.term -> Ast.term -> (Ast.term -> FailureMonad nat) -> FailureMonad (prod Ast.term Ast.term)).
+  Definition helperTermVarsType := (Ast.term -> FailureMonad (list Ast.term)).
+  Definition helperFormReifierType := (Ast.term -> nat -> Ast.term -> (Ast.term -> FailureMonad nat) -> FailureMonad (prod Ast.term Ast.term)).
+  Definition helperFormVarsType := (Ast.term->nat->FailureMonad (list Ast.term)).
+  Definition baseConnectiveReifier := Ast.term -> list Ast.term -> nat -> Ast.term -> (Ast.term -> FailureMonad nat) -> helperFormReifierType -> helperTermReifierType -> FailureMonad (prod Ast.term Ast.term).
+  Definition baseConnectiveVars := list Ast.term -> nat -> Ast.term -> helperFormVarsType -> helperTermVarsType -> FailureMonad (list Ast.term).
 
+  Definition termFinderVars := nat -> Ast.term -> helperTermVarsType -> FailureMonad (list Ast.term).
+  Definition termFinderReifier := Ast.term -> nat -> Ast.term -> Ast.term -> (Ast.term -> FailureMonad nat) 
+                                  -> helperTermReifierType -> FailureMonad (prod Ast.term Ast.term).
+
+  Definition propFinderVars := Ast.term -> nat -> Ast.term -> nat -> helperFormVarsType -> helperTermVarsType -> (FailureMonad (list Ast.term)).
+  Definition propFinderReifier := Ast.term -> nat -> Ast.term -> nat -> Ast.term -> (Ast.term -> FailureMonad nat) -> helperFormReifierType -> helperTermReifierType -> FailureMonad (prod Ast.term Ast.term).
+
+  (* When running in no proof mode, extension points still expect proofs. We give this dummy term. If the extension point only uses this to build further proofs, the whole term is discarded in the end *)
+  Definition noProofDummy := tVar "NoProofGivenBecauseWeAreInNoProofMode".
+  (* An instance of this class is required for the reifier to work. From it the basic reification building blocks are derived *)
   Class tarski_reflector := {
-    fs : funcs_signature;
-    ps : preds_signature;
+    fs : funcs_signature; 
+    ps : preds_signature; (* ps and fs give the syntax *)
     D  : Type;
-    I  : @interp fs ps D;
-    emptyEnv : nat -> D;
-    isD : Ast.term -> bool;
+    I  : @interp fs ps D; (* D and I give our model *)
+    emptyEnv : nat -> D;  (* We need an "empty" env that returns some default value for our types *)
+    isD : Ast.term -> bool;  (* Returns true iff the given term references D used above *)
   }. 
+  (* Extension point to extend the libary to more syntactic constructs *)
   Class tarski_reflector_extensions (t:tarski_reflector) := {
-    baseLogicConnHelper : option (string -> baseConnectiveReifier);
-    baseLogicVarHelper : option (string -> baseUBVarFinder)
+    baseLogicConnHelper : option (string -> baseConnectiveReifier); 
+    baseLogicVarHelper : option (string -> baseConnectiveVars);     (* for reifying instances of inductive types Coq.Init.Logic.* applied to arguments. Mostly used for reifying eq *)
+    termReifierVarHelper : option termFinderVars;    
+    termReifierReifyHelper : option termFinderReifier;              (* for reifying all terms that we fail to reify *)
+    formReifierVarHelper : option propFinderVars;
+    formReifierReifyHelper : option propFinderReifier               (* for reifying all forms that we fail to reify *)
   }.
-  Definition defaultExtensions tr : tarski_reflector_extensions tr := Build_tarski_reflector_extensions tr None None.
-
+  (* Used if no instance of the above extension class can be found *)
+  Definition defaultExtensions tr : tarski_reflector_extensions tr := Build_tarski_reflector_extensions tr None None None None None None.
+  (* Useful builder to build the main tarski_reflector class *)
   Definition buildDefaultTarski {fs:funcs_signature} {ps:preds_signature} {D:Type} {I:@interp fs ps D} (point:D) (isD:Ast.term -> bool) := Build_tarski_reflector fs ps D I (fun n:nat => point) isD.
   Context {tr : tarski_reflector}.
+  (* These types are used to define representability. A n-ary formula is representable if there is a syntactic formula and an environment that you can plug the relevant values into that is equivalent *)
   Fixpoint naryProp (n:nat) : Type := match n with 0 => Prop | S nn => D -> naryProp nn end.
   Fixpoint representsP {n:nat} phi rho : (forall (P:naryProp n), Prop) := match n return (forall (P:naryProp n), Prop) with
        0  => (fun (P:Prop) => P <-> @sat fs ps D I rho phi)
@@ -129,6 +162,7 @@ Section AbstractReflectionDefinitions.
   Definition representsF (d:D) trm rho := @eval fs ps D I rho trm = d.
   Definition representableF (d:D) := exists trm rho, representsF d trm rho.
 
+  (* Functions that allow us to construct syntactic connective applications without building vectors in MetaCoq *)
   Fixpoint naryGFunc (n:nat) (A R : Type) := match n with 0 => R | S n => A -> @naryGFunc n A R end.
   Fixpoint takeMultiple {n : nat} (X Y:Type)  : (Vector.t X n -> Y) -> @naryGFunc n X Y := 
      match n as nn return (Vector.t X nn -> Y) -> @naryGFunc nn X Y
@@ -141,6 +175,7 @@ Section AbstractReflectionDefinitions.
                       := match n with 0 => fun mA mB => C' (mA (Vector.nil A)) (mB (Vector.nil B))
                                   | S n => fun mA mB => forall (a:A) (b:B), C a b -> @nary3GFunc n A B A' B' C C' (fun v => mA (Vector.cons A a n v)) (fun v => mB (Vector.cons B b n v)) end.
 
+  (* Proof that the functions build using the above helper actually represent the syntactic construct they are supposed to represent *)
   Definition mergeTermBase (c:@syms (@fs tr)) : Type := 
   forall (rho:nat -> D), @nary3GFunc (ar_syms c) term D term D 
                                      (fun t d => representsF d t rho) (fun t d => representsF d t rho) 
@@ -172,14 +207,15 @@ Section AbstractReflectionDefinitions.
   Defined.
   Definition mergeForm (c:preds) : mergeFormBase c.
   Proof. intros rho. eapply mergeFormProto. now intros v. Defined.
+  (* Quotes of these functions which are later used to construct (proof) terms *)
   MetaCoq Quote Definition qConstructTerm := constructTerm.
   MetaCoq Quote Definition qMergeTerm := mergeTerm.
   MetaCoq Quote Definition qConstructForm := constructForm.
   MetaCoq Quote Definition qMergeForm := mergeForm.
-
 End AbstractReflectionDefinitions.
 
 Section TarskiMerging.
+  (* Code to merge the basic tarski semantics that is fixed for all models - namely logical and, or, implication, falsity, forall and exists-quantisation *)
   Context {tr : tarski_reflector}.
   Context {te : tarski_reflector_extensions tr}.
   Definition mergeFalse (rho:nat -> D) : @representsP tr 0 fal rho False.
@@ -237,40 +273,71 @@ Section TarskiMerging.
   Definition mForall := (@quant fs ps full_operators All).
   MetaCoq Quote Definition qMergeFormForall := @mForall.
 
+  Definition mergeIff (rho:nat -> D) (P Q : naryProp 0) (fP fQ : form) : representsP fP rho P -> representsP fQ rho Q -> @representsP _ 0 ((fP-->fQ)∧(fQ-->fP)) rho (P <-> Q).
+  Proof. intros H1 H2. cbn. cbn in H1,H2. rewrite H2, H1. reflexivity. Defined.
+  Definition mIff := (fun fP fQ : form => mAnd (mImpl fP fQ) (mImpl fQ fP)).
+  MetaCoq Quote Definition qMergeFormIff := @mIff.
+  MetaCoq Quote Definition qMergeIff := mergeIff. 
+
+  Definition mergeTrue (rho:nat -> D) : @representsP _ 0 (fal-->fal) rho (True).
+  Proof. cbn. tauto. Defined.
+  Definition mTrue := (mImpl mFalse mFalse).
+  MetaCoq Quote Definition qMergeFormTrue := @mTrue.
+  MetaCoq Quote Definition qMergeTrue := mergeTrue.
+
+  (* Notation for matching constructs like Coq.Init.Logic.and prop1 prop2 -> (x:="and", l:=[term1, term2]) *)
   Notation baseLogicConn x l:= (tInd {| inductive_mind := (MPfile (["Logic"; "Init"; "Coq"]), x); inductive_ind := 0 |} l).
-  Definition reifyAnd : baseConnectiveReifier := fun tct lst _ envTerm env fPR => match lst with [x; y] => 
+  Definition reifyFalse : baseConnectiveReifier := fun tct lst _ envTerm env fPR _ => match lst with nil => ret (tApp qMergeFormFalse ([tct]), tApp qMergeFalse ([tct;envTerm])) | _ => fail "False applied to terms" end. 
+  Definition reifyAnd : baseConnectiveReifier := fun tct lst _ envTerm env fPR _ => match lst with [x; y] => 
                                              xr <- fPR x 0 envTerm env;;yr <- fPR y 0 envTerm env;; let '((xt,xp),(yt,yp)) := (xr,yr) in
                                              ret (tApp qMergeFormAnd ([tct;xt;yt]), tApp qMergeAnd ([tct;envTerm;x;y;xt;yt;xp;yp])) | _ => fail "And applied to != 2 terms" end.
-  Definition reifyOr  : baseConnectiveReifier := fun tct lst _ envTerm env fPR => match lst with [x; y] => 
+  Definition reifyOr  : baseConnectiveReifier := fun tct lst _ envTerm env fPR _ => match lst with [x; y] => 
                                              xr <- fPR x 0 envTerm env;;yr <- fPR y 0 envTerm env;; let '((xt,xp),(yt,yp)) := (xr,yr) in
                                              ret (tApp qMergeFormOr ([tct;xt;yt]),tApp qMergeOr ([tct;envTerm;x;y;xt;yt;xp;yp])) | _ => fail "Or applied to != 2 terms" end.
-  Definition reifyExist:baseConnectiveReifier := fun tct lst _ envTerm env fPR => match lst with [_; P] => 
+  Definition reifyExist:baseConnectiveReifier := fun tct lst _ envTerm env fPR _ => match lst with [_; P] => 
                                              rr <- fPR P 1 envTerm env;; let '(rt,rp) := rr in 
                                              ret (tApp qMergeFormExists ([tct;rt]), tApp qMergeExists ([tct;envTerm;P;rt;rp])) | _ => fail "Exist applied to wrong terms" end.
+  Definition reifyIff : baseConnectiveReifier := fun tct lst _ envTerm env fPR _ => match lst with [x; y] => 
+                                             xr <- fPR x 0 envTerm env;;yr <- fPR y 0 envTerm env;; let '((xt,xp),(yt,yp)) := (xr,yr) in
+                                             ret (tApp qMergeFormIff ([tct;xt;yt]), tApp qMergeIff ([tct;envTerm;x;y;xt;yt;xp;yp])) | _ => fail "Iff applied to != 2 terms" end.
+  Definition reifyTrue : baseConnectiveReifier := fun tct l fuel envTerm env fPR _ => match l with nil =>
+                                             ret (tApp qMergeFormTrue ([tct]), tApp qMergeTrue ([tct;envTerm]))| _ => fail "True applied to terms" end.
   Definition reifyBase (s:string): baseConnectiveReifier 
-                            := match s with "and" => reifyAnd | "or" => reifyOr | "ex" => reifyExist | 
+                            := match s with "and" => reifyAnd | "or" => reifyOr | "ex" => reifyExist |  "False" => reifyFalse | "True" => reifyTrue |
                                        _ => match baseLogicConnHelper with 
-                                             None =>fun _ _ _ _ _ _ => fail ("Unknown connective "++s) | 
+                                             None =>fun _ _ _ _ _ _ _ => fail ("Unknown connective "++s) | 
                                              Some k => k s end end.
-
-  Definition baseConnectiveReifierNP := Ast.term -> list Ast.term -> nat -> Ast.term -> (Ast.term -> FailureMonad nat) -> (Ast.term -> nat -> Ast.term -> (Ast.term -> FailureMonad nat) -> FailureMonad ( Ast.term))-> FailureMonad (Ast.term).
-  Definition reifyAndNP : baseConnectiveReifierNP := fun tct lst _ envTerm env fPR => match lst with [x; y] => 
+  (* Used in no-proof mode, where we just build the representing term and hope they are computationally equal *)
+  Definition baseConnectiveReifierNP := Ast.term -> list Ast.term -> nat -> Ast.term -> (Ast.term -> FailureMonad nat) -> 
+                                       (Ast.term -> nat -> Ast.term -> (Ast.term -> FailureMonad nat) -> FailureMonad ( Ast.term)) -> 
+                                       (Ast.term -> Ast.term -> Ast.term -> (Ast.term -> FailureMonad nat) -> FailureMonad (Ast.term)) -> FailureMonad (Ast.term).
+  Definition reifyFalseNP : baseConnectiveReifierNP := fun tct lst _ envTerm env fPR _ => match lst with nil => ret (tApp qMergeFormFalse ([tct])) | _ => fail "False applied to terms" end. 
+  Definition reifyAndNP : baseConnectiveReifierNP := fun tct lst _ envTerm env fPR _ => match lst with [x; y] => 
                                              xt <- fPR x 0 envTerm env;;yt <- fPR y 0 envTerm env;; 
                                              ret (tApp qMergeFormAnd ([tct;xt;yt])) | _ => fail "And applied to != 2 terms" end.
-  Definition reifyOrNP  : baseConnectiveReifierNP := fun tct lst _ envTerm env fPR => match lst with [x; y] => 
+  Definition reifyOrNP  : baseConnectiveReifierNP := fun tct lst _ envTerm env fPR _ => match lst with [x; y] => 
                                              xt <- fPR x 0 envTerm env;;yt <- fPR y 0 envTerm env;; 
                                              ret (tApp qMergeFormOr ([tct;xt;yt])) | _ => fail "Or applied to != 2 terms" end.
-  Definition reifyExistNP:baseConnectiveReifierNP := fun tct lst _ envTerm env fPR => match lst with [_; P] => 
+  Definition reifyExistNP:baseConnectiveReifierNP := fun tct lst _ envTerm env fPR _ => match lst with [_; P] => 
                                              rt <- fPR P 1 envTerm env;;
                                              ret (tApp qMergeFormExists ([tct;rt])) | _ => fail "Exist applied to wrong terms" end.
+  Definition reifyIffNP : baseConnectiveReifierNP := fun tct lst _ envTerm env fPR _ => match lst with [x; y] => 
+                                             xt <- fPR x 0 envTerm env;;yt <- fPR y 0 envTerm env;;
+                                             ret (tApp qMergeFormIff ([tct;xt;yt])) | _ => fail "Iff applied to != 2 terms" end.
+  Definition reifyTrueNP : baseConnectiveReifierNP := fun tct l fuel envTerm env fPR _ => match l with nil =>
+                                             ret (tApp qMergeFormTrue ([tct]))| _ => fail "True applied to terms" end.
   Definition reifyBaseNP (s:string): baseConnectiveReifierNP 
-                            := match s with "and" => reifyAndNP | "or" => reifyOrNP | "ex" => reifyExistNP | 
+                            := match s with "and" => reifyAndNP | "or" => reifyOrNP | "ex" => reifyExistNP |  "False" => reifyFalseNP |  "True" => reifyTrueNP | 
                                        _ => match baseLogicConnHelper with 
-                                             None =>fun _ _ _ _ _ _ => fail ("Unknown connective "++s) | 
-                                             Some k => fun tct lst fuel envTerm env fPR => both <- k s tct lst fuel envTerm env (fun P n et e => rr <- fPR P n et e;; ret (rr, tVar "NoProofGivenBecauseWeAreInNoProofMode"));; let '(trm,_) := both in ret trm end end.
+                                             None =>fun _ _ _ _ _ _ _ => fail ("Unknown connective "++s) | 
+                                             Some k => fun tct lst fuel envTerm env fPR fTR => both <- k s tct lst fuel envTerm env 
+                                                                                                        (fun P n et e => rr <- fPR P n et e;; ret (rr, noProofDummy)) 
+                                                                                                        (fun tct t eT env => rr <- fTR tct t eT env;; ret (rr, noProofDummy));; 
+                                                                  let '(trm,_) := both in ret trm end end.
 End TarskiMerging.
 
 Section ReificationHelpers.
+  (* Construct the reification (and potentially the proof) of the connectives being used on points of D *)
   Definition termReifier := Ast.term -> list Ast.term -> Ast.term -> (Ast.term -> FailureMonad (prod Ast.term Ast.term)) -> FailureMonad (prod Ast.term Ast.term).
   Definition termReifierNP := Ast.term -> list Ast.term -> Ast.term -> (Ast.term -> FailureMonad (Ast.term)) -> FailureMonad (Ast.term).
   (* typeClassTerm -> vector of args -> env term -> recursion for arg vector -> prod (term, proof that term represents input *)
@@ -291,6 +358,7 @@ Section ReificationHelpers.
 End ReificationHelpers.
 
 Section EnvHelpers.
+  (* Working with the environment. Since it is sometimes pulled into lambda-functions, and contains tRel terms, it has to be correctly inserted into the lower term *)
   Definition appendZero (env:Ast.term -> FailureMonad nat) (zv:FailureMonad nat) : (Ast.term -> FailureMonad nat) := 
         fun (t:Ast.term) => match t with tRel n => (match n with 0 => zv | S n => env (tRel n) end) | _ => k <- lowerRelIndex 0 (fail "tRel 0 used when lowering") t;; (env k) end.
   Definition appendAndLift (env:Ast.term -> FailureMonad nat) (zv:FailureMonad nat) : (Ast.term -> FailureMonad nat) := 
@@ -302,104 +370,118 @@ Section EnvHelpers.
 End EnvHelpers.
 
 Section EnvConstructor.
+  (* Constructs the environment used to help with free variables in terms *)
   Existing Instance config.default_checker_flags.
   MetaCoq Quote Definition qFs := @fs.
   MetaCoq Quote Definition qLocalVar := @var.
   MetaCoq Quote Definition qI_f := @i_f.
   MetaCoq Quote Definition qI_P := @i_P.
-
+  Context {tr : tarski_reflector}.
+  Context {te : tarski_reflector_extensions tr}.
+  (* Given a term in the semantic, construct an environment that contains all atoms that appear in the term (and are not otherwise representable) *)
   Fixpoint findUBRecursively (lt : list Ast.term) (IH : Ast.term -> FailureMonad (list Ast.term)) : FailureMonad ((list Ast.term) ) :=
        match lt with nil => ret (nil)
                  | t::tr => rep <- IH t;; replist <- findUBRecursively tr IH;;ret (rep++replist) end.
   
-  Fixpoint findUnboundVariablesTerm (fuel:nat) (t:Ast.term) {struct fuel}: (FailureMonad (list Ast.term)) := 
-    let ffail := match t with tRel _ => ret nil | _ => ret ([t]) end in match fuel with 
+  Fixpoint findUnboundVariablesTerm (fuel:nat) (t:Ast.term) {struct fuel}: (FailureMonad (list Ast.term)) := match fuel with 
       0 => fail "Out of fuel" 
-      | S fuel => match t with
+      | S fuel => let ffail := orelse (match @termReifierVarHelper _ te with None => fail "Fallthrough" | Some k => k fuel t (findUnboundVariablesTerm fuel) end)
+                        (match t with tRel _ => ret nil | _ => ret ([t]) end) in (* tRel are things introduced by forall/exists and so on, which we do not add to the environment *)
+          match t with
           tApp arg l => if Checker.eq_term init_graph arg qI_f then match popNElements l 4 with (*4 for funcs, preds, domain, interp *)
             Some ([fnc;v]) => vr <- recoverVector v;;findUBRecursively vr (findUnboundVariablesTerm fuel)
            | _ => ffail end else ffail
         | _ => ffail
       end 
     end.
+  (*Our notation from above*)
+  Notation baseLogicConn x l:= (tInd {| inductive_mind := (MPfile (["Logic"; "Init"; "Coq"]), x); inductive_ind := 0 |} l).
+  (* Find the unbound variables for our basic forms *)
+  Definition findUBFalse  :baseConnectiveVars := fun lst _ _ fPR _ => match lst with nil => 
+                                             ret (nil) | _ => fail "False applied to terms" end.
+  Definition findUBAnd  :baseConnectiveVars := fun lst _ _ fPR _ => match lst with [x; y] => 
+                                             xt <- fPR x 0;;yt <- fPR y 0;; 
+                                             ret (xt++yt) | _ => fail "And applied to != 2 terms" end.
+  Definition findUBOr   :baseConnectiveVars := fun lst _ _ fPR _ => match lst with [x; y] => 
+                                             xt <- fPR x 0;;yt <- fPR y 0;; 
+                                             ret (xt++yt) | _ => fail "Or applied to != 2 terms" end.
+  Definition findUBExists:baseConnectiveVars := fun lst _ _ fPR _ => match lst with [_; P] => fPR P 1 | _ => fail "Exist applied to wrong terms" end.
+  Definition findUBTrue : baseConnectiveVars := fun lst fuel tct _ _ => match lst with nil => ret nil | _ => fail "True applied to terms" end.
+  Definition findUBIff  :baseConnectiveVars := fun lst _ _ fPR _ => match lst with [x; y] => 
+                                           xt <- fPR x 0;;yt <- fPR y 0;; 
+                                           ret (xt++yt) | _ => fail "Iff applied to != 2 terms" end.
 
-    Context {tr : tarski_reflector}.
-    Context {te : tarski_reflector_extensions tr}.
-    Notation baseLogicConn x l:= (tInd {| inductive_mind := (MPfile (["Logic"; "Init"; "Coq"]), x); inductive_ind := 0 |} l).
-    Definition findUBAnd  :baseUBVarFinder := fun lst _ _ fPR => match lst with [x; y] => 
-                                               xt <- fPR x 0;;yt <- fPR y 0;; 
-                                               ret (xt++yt) | _ => fail "And applied to != 2 terms" end.
-    Definition findUBOr   :baseUBVarFinder := fun lst _ _ fPR => match lst with [x; y] => 
-                                               xt <- fPR x 0;;yt <- fPR y 0;; 
-                                               ret (xt++yt) | _ => fail "Or applied to != 2 terms" end.
-    Definition findUBExists:baseUBVarFinder := fun lst _ _ fPR => match lst with [_; P] => fPR P 1 | _ => fail "Exist applied to wrong terms" end.
-    Definition findUBBase (s:string) : baseUBVarFinder 
-            := match s with "and" => findUBAnd | "or" => findUBOr | "ex" => findUBExists | _ => 
-                  match @baseLogicVarHelper tr te with None => fun _ _ _ _ => fail ("Unknown connective "++s) | Some k => k s end end.
-
-    Definition maybeD : Ast.term -> Ast.term -> bool := fun tct mD => if @isD tr mD then true else Checker.eq_term init_graph mD (tApp qD ([tct])).
-    Fixpoint findUnboundVariablesForm (tct:Ast.term) (fuel:nat) (t:Ast.term) (frees:nat) {struct fuel}: (FailureMonad (list Ast.term)) := 
-    let ffail := fail ("Cannot introspect form " ++ string_of_term t) in match fuel with 0 => fail "Out of fuel" | S fuel => 
-      match (frees,t) with
-      (0,(baseLogicConn "False" nil)) => ret (nil)
-    | (0,(tApp (baseLogicConn name nil) lst)) => findUBBase name lst fuel tct (findUnboundVariablesForm tct fuel)
-    | (0,(tApp arg lst)) => if Checker.eq_term init_graph arg qI_P then match popNElements lst 4 with
-            Some ([fnc;v]) => vr <- recoverVector v;;findUBRecursively vr (fun t => findUnboundVariablesTerm fuel t)
-          | _ => ffail end else ffail
-    | (0,tProd x P Q) => if maybeD tct (P) then
-                              findUnboundVariablesForm tct fuel (tLambda x P Q) 1
-                         else
-                              rP <- findUnboundVariablesForm tct fuel P 0;;
-                              Ql <- lowerRelIndex 0 (fail "Used var of implication precondition") Q;;
-                              rQ <- findUnboundVariablesForm tct fuel Ql 0;;
-                              ret (rP++rQ)
-    | (S n,tLambda x T P) => if maybeD tct T then
-          findUnboundVariablesForm tct fuel P n
-         else ffail
-    | _ => ffail end end.
-
-   Fixpoint createEnvTerms (tct:Ast.term) (l:list Ast.term) (base:Ast.term) : prod (Ast.term) (Ast.term -> FailureMonad nat) := match l with 
-         nil => (base,unboundEnv)
-     | x::xr => let '(envTerm,env) := createEnvTerms tct xr base in (raiseEnvTerm tct x envTerm, fun a:Ast.term => if Checker.eq_term init_graph x a then ret 0 else v <- env a;;ret (S v)) end.
+  Definition findUBBase (s:string) : baseConnectiveVars 
+          := match s with "and" => findUBAnd | "or" => findUBOr | "ex" => findUBExists | "False" => findUBFalse | "True" => findUBFalse | _ => 
+                match @baseLogicVarHelper tr te with None => fun _ _ _ _ _ => fail ("Unknown connective "++s) | Some k => k s end end.
+  MetaCoq Quote Definition qIff := @iff.
+  Definition maybeD : Ast.term -> Ast.term -> bool := fun tct mD => if @isD tr mD then true else Checker.eq_term init_graph mD (tApp qD ([tct])).
+  Fixpoint findUnboundVariablesForm (tct:Ast.term) (fuel:nat) (t:Ast.term) (frees:nat) {struct fuel}: (FailureMonad (list Ast.term)) := 
+  let ffail := fail ("Cannot introspect form "++ string_of_term t) in match fuel with 0 => fail "Out of fuel" | S fuel => 
+    match (frees,t) with
+    (0,(baseLogicConn name nil)) => findUBBase name nil fuel tct (findUnboundVariablesForm tct fuel) (findUnboundVariablesTerm fuel)
+  | (0,(tApp (baseLogicConn name nil) lst)) => findUBBase name lst fuel tct (findUnboundVariablesForm tct fuel) (findUnboundVariablesTerm fuel)
+  | (0,(tApp arg lst)) => if Checker.eq_term init_graph arg qI_P then match popNElements lst 4 with
+          Some ([fnc;v]) => vr <- recoverVector v;;findUBRecursively vr (fun t => findUnboundVariablesTerm fuel t)
+        | _ => ffail  end else if Checker.eq_term init_graph arg qIff then findUBIff lst fuel tct (findUnboundVariablesForm tct fuel) (findUnboundVariablesTerm fuel) else ffail 
+  | (0,tProd x P Q) => if maybeD tct (P) then
+                            findUnboundVariablesForm tct fuel (tLambda x P Q) 1
+                       else (*implication*)
+                            rP <- findUnboundVariablesForm tct fuel P 0;;
+                            Ql <- lowerRelIndex 0 (fail "Used var of implication precondition") Q;;
+                            rQ <- findUnboundVariablesForm tct fuel Ql 0;;
+                            ret (rP++rQ)
+  | (S n,tLambda x T P) => if maybeD tct T then
+        findUnboundVariablesForm tct fuel P n
+       else ffail
+  | _ => ffail  end end.
+ (* Builds the actual env out of a list of free variables *)
+ Fixpoint createEnvTerms (tct:Ast.term) (l:list Ast.term) (base:Ast.term) : prod (Ast.term) (Ast.term -> FailureMonad nat) := match l with 
+       nil => (base,unboundEnv)
+   | x::xr => let '(envTerm,env) := createEnvTerms tct xr base in (raiseEnvTerm tct x envTerm, fun a:Ast.term => if Checker.eq_term init_graph x a then ret 0 else v <- env a;;ret (S v)) end.
 End EnvConstructor.
 
 Section MainReificationFunctions.
   Context {tr : tarski_reflector}.
   Context {te : tarski_reflector_extensions tr}.
   Existing Instance config.default_checker_flags.
-  Fixpoint findTermRepresentation (tct:Ast.term) (fuel:nat) (t:Ast.term) (termEnv:Ast.term) (env:Ast.term -> FailureMonad nat) {struct fuel}: (FailureMonad (prod Ast.term Ast.term)) := 
-    let ffail := (envv <- env (t);;let num := quoteNumber (envv) in ret (tApp qLocalVar ([tApp qFs ([tct]);num]),tApp qeq_refl ([tApp qD ([tct]);t]))) in match fuel with 
+  (* Constructs the actual term representing some term of the model, along with a proof *)
+  Fixpoint findTermRepresentation (tct:Ast.term) (fuel:nat) (t:Ast.term) (termEnv:Ast.term) (env:Ast.term -> FailureMonad nat) {struct fuel}: (FailureMonad (prod Ast.term Ast.term)) := match fuel with 
       0 => fail "Out of fuel" 
-      | S fuel => match t with
+      | S fuel =>
+    let fallback := orelse (match @termReifierReifyHelper _ te with None => fail "none" | Some k => k tct fuel t termEnv env (fun l => findTermRepresentation l fuel) end)
+                           (envv <- env (t);;let num := quoteNumber (envv) in ret (tApp qLocalVar ([tApp qFs ([tct]);num]),tApp qeq_refl ([tApp qD ([tct]);t]))) in match t with
           tApp arg l => if Checker.eq_term init_graph arg qI_f then match popNElements l 4 with (*4 for funcs, preds, domain, interp *)
             Some ([fnc;v]) => vr <- recoverVector v;;reifyTerm fnc tct vr termEnv (fun t => findTermRepresentation tct fuel t termEnv env)
-           | _ => ffail end else ffail
-        | _ => ffail
+           | _ => fallback end else fallback
+        | _ => fallback
       end 
     end.
-
-  Fixpoint findTermRepresentationNP (tct:Ast.term) (fuel:nat) (t:Ast.term) (termEnv:Ast.term) (env:Ast.term -> FailureMonad nat) {struct fuel}: (FailureMonad (Ast.term)) := 
-    let ffail := (envv <- env (t);;let num := quoteNumber (envv) in ret (tApp qLocalVar ([tApp qFs ([tct]);num]))) in match fuel with 
+  (* Like the above, but without the proof *)
+  Fixpoint findTermRepresentationNP (tct:Ast.term) (fuel:nat) (t:Ast.term) (termEnv:Ast.term) (env:Ast.term -> FailureMonad nat) {struct fuel}: (FailureMonad (Ast.term)) := match fuel with 
       0 => fail "Out of fuel" 
-      | S fuel => match t with
+      | S fuel =>
+    let fallback := orelse (match @termReifierReifyHelper _ te with None => fail "none" | Some k => pr <- k tct fuel t termEnv env (fun tct' t' te' e' => v <- findTermRepresentationNP tct' fuel t' te' e';;ret (v,noProofDummy));; let '(pr1,pr2) := pr in ret pr1 end)
+                           (envv <- env (t);;let num := quoteNumber (envv) in ret (tApp qLocalVar ([tApp qFs ([tct]);num]))) in match t with
           tApp arg l => if Checker.eq_term init_graph arg qI_f then match popNElements l 4 with (*4 for funcs, preds, domain, interp *)
             Some ([fnc;v]) => vr <- recoverVector v;;reifyTermNP fnc tct vr termEnv (fun t => findTermRepresentationNP tct fuel t termEnv env)
-           | _ => ffail end else ffail
-        | _ => ffail
+           | _ => fallback end else fallback
+        | _ => fallback
       end 
     end.
 
     Notation baseLogicConn x l:= (tInd {| inductive_mind := (MPfile (["Logic"; "Init"; "Coq"]), x); inductive_ind := 0 |} l).
 
-
+    (* Like the above, but here we do it for statements about points of D instead of points of D *)
     Fixpoint findPropRepresentation (tct:Ast.term) (fuel:nat) (t:Ast.term) (frees:nat) (envTerm:Ast.term) (env:Ast.term -> FailureMonad nat) {struct fuel}: (FailureMonad (prod Ast.term Ast.term)) := 
-    let ffail :=fail ("Cannot represent form " ++ string_of_term t) in match fuel with 0 => fail "Out of fuel" | S fuel => 
-      match (frees,t) with
-      (0,(baseLogicConn "False" nil)) => ret (tApp qMergeFormFalse ([tct]), tApp qMergeFalse ([tct;envTerm]))
-    | (0,(tApp (baseLogicConn name nil) lst)) => reifyBase name tct lst fuel envTerm env (findPropRepresentation tct fuel)
+    match fuel with 0 => fail "Out of fuel" | S fuel => 
+    let ffail := orelse (match @formReifierReifyHelper _ te with None => fail "none" | Some k => k tct fuel t frees envTerm env (findPropRepresentation tct fuel) (fun l => findTermRepresentation l fuel) end) 
+                        (fail ("Cannot represent form " ++ string_of_term t)) in match (frees,t) with
+      (0,(baseLogicConn name nil)) => reifyBase name tct nil fuel envTerm env (findPropRepresentation tct fuel) (fun tct => findTermRepresentation tct fuel)
+    | (0,(tApp (baseLogicConn name nil) lst)) => reifyBase name tct lst fuel envTerm env (findPropRepresentation tct fuel) (fun tct => findTermRepresentation tct fuel)
     | (0,(tApp arg lst)) => if Checker.eq_term init_graph arg qI_P then match popNElements lst 4 with
             Some ([fnc;v]) => vr <- recoverVector v;;reifyForm fnc tct vr envTerm (fun t => findTermRepresentation tct fuel t envTerm env)
-          | _ => ffail end else ffail
+          | _ => ffail end else if Checker.eq_term init_graph arg qIff then reifyIff tct lst fuel envTerm env (findPropRepresentation tct fuel) (fun tct => findTermRepresentation tct fuel) else ffail
     | (0,tProd x P Q) => if maybeD tct (P) then
                               rQ <- findPropRepresentation tct fuel (tLambda x P Q) 1 envTerm env;; let '(tQ,pQ) := rQ in
                               ret (tApp qMergeFormForall ([tct;tQ]), tApp qMergeForall ([tct;envTerm;tLambda x P Q;tQ;pQ]))
@@ -415,15 +497,16 @@ Section MainReificationFunctions.
           ret (tk,(tLambda x (tApp qD ([tct])) pk))
          else ffail
     | _ => ffail end end.
-
+    (* like the above but again the no-proof version *)
     Fixpoint findPropRepresentationNP (tct:Ast.term) (fuel:nat) (t:Ast.term) (frees:nat) (envTerm:Ast.term) (env:Ast.term -> FailureMonad nat) {struct fuel}: (FailureMonad (Ast.term)) := 
-    let ffail :=fail ("Cannot represent form " ++ string_of_term t) in match fuel with 0 => fail "Out of fuel" | S fuel => 
-      match (frees,t) with
-      (0,(baseLogicConn "False" nil)) => ret (tApp qMergeFormFalse ([tct]))
-    | (0,(tApp (baseLogicConn name nil) lst)) => reifyBaseNP name tct lst fuel envTerm env (findPropRepresentationNP tct fuel)
+    match fuel with 0 => fail "Out of fuel" | S fuel => 
+      let ffail := orelse (match @formReifierReifyHelper _ te with None => fail "none" | Some k => rr <- k tct fuel t frees envTerm env (fun t f et e => v <- findPropRepresentationNP tct fuel t f et e;; ret (v,noProofDummy)) (fun l t et e => v <- findTermRepresentationNP l fuel t et e;;ret (v,noProofDummy));;let '(trm,_) := rr in ret trm end)  
+                          (fail ("Cannot represent form " ++ string_of_term t)) in match (frees,t) with
+      (0,(baseLogicConn name nil)) => reifyBaseNP name tct nil fuel envTerm env (findPropRepresentationNP tct fuel) (fun tct => findTermRepresentationNP tct fuel)
+    | (0,(tApp (baseLogicConn name nil) lst)) => reifyBaseNP name tct lst fuel envTerm env (findPropRepresentationNP tct fuel) (fun tct => findTermRepresentationNP tct fuel)
     | (0,(tApp arg lst)) => if Checker.eq_term init_graph arg qI_P then match popNElements lst 4 with
             Some ([fnc;v]) => vr <- recoverVector v;;reifyFormNP fnc tct vr envTerm (fun t => findTermRepresentationNP tct fuel t envTerm env)
-          | _ => ffail end else ffail
+          | _ => ffail end else if Checker.eq_term init_graph arg qIff then reifyIffNP tct lst fuel envTerm env (findPropRepresentationNP tct fuel) (fun tct => findTermRepresentationNP tct fuel) else ffail
     | (0,tProd x P Q) => if maybeD tct (P) then
                               tQ <- findPropRepresentationNP tct fuel (tLambda x P Q) 1 envTerm env;; 
                               ret (tApp qMergeFormForall ([tct;tQ]))
@@ -441,7 +524,7 @@ Section MainReificationFunctions.
     | _ => ffail end end.
 End MainReificationFunctions.
 
-
+(* Given an env and an env helper, represent a statement about D (find a from and a proof that represents it *)
 Definition FUEL := 100. 
 Ltac representEnvP env env2:= 
 match goal with [ |- @representableP ?i ?n ?G ] =>
@@ -458,7 +541,7 @@ match goal with [ |- @representableP ?i ?n ?G ] =>
   ;exists rep;exists env;exact prf 
 end.
 
-
+(* Like the above, but no-proof mode. We hope easy can proof it*)
 Ltac representEnvPNP env env2:= 
 match goal with [ |- @representableP ?i ?n ?G ] =>
   let rep := fresh "rep" in let prf := fresh "prf" in let k y := (pose y as rep) in
@@ -473,10 +556,11 @@ match goal with [ |- @representableP ?i ?n ?G ] =>
   ;exists rep;exists env;try easy 
 end.
 
+(* Construct the environment, then invoke another ltac *)
 Definition HiddenTerm {X:Type} {x:X} := x.
-Ltac constructEnv' envBase envTerm := 
+Ltac constructEnvCont cont := 
 match goal with [ |- @representableP ?i ?n ?G ] => (*(pose (fst y) as envBase;pose (snd y) as envTerm*)
-  (*let envBase := fresh "envBase" in let envTerm := fresh "envTerm" in *)let k y := (pose (@HiddenTerm (nat -> @D i) (fst y)) as envBase;pose (@HiddenTerm (Ast.term -> FailureMonad nat) (snd y)) as envTerm) in
+  (*let envBase := fresh "envBase" in let envTerm := fresh "envTerm" in *)
   (run_template_program (monad_utils.bind (tmQuote i) (fun tct =>
                          monad_utils.bind (tmQuote G) (fun g => 
                          monad_utils.bind (tmInferInstance None (tarski_reflector_extensions i)) (fun treO => let tre := match treO with my_Some kk => kk | my_None => defaultExtensions i end in
@@ -484,11 +568,14 @@ match goal with [ |- @representableP ?i ?n ?G ] => (*(pose (fst y) as envBase;po
                          monad_utils.bind (f2t ((@findUnboundVariablesForm i tre tct FUEL g n))) (fun lst => 
                          let '(envToDR,envToNat) := (createEnvTerms tct lst baseEnv) in
                          monad_utils.bind (tmUnquoteTyped (nat -> @D i) envToDR) (fun envToD => 
-                         monad_utils.ret (pair envToD envToNat)))))))) k)
+                         monad_utils.ret (pair envToD envToNat)))))))) cont)
 end.
-
+(* Construct the env, then bind it to envBase and envTerm *)
+Ltac constructEnv' envBase envTerm := match goal with [ |- @representableP ?i ?n ?G ] => let k y := (pose (@HiddenTerm (nat -> @D i) (fst y)) as envBase;pose (@HiddenTerm (Ast.term -> FailureMonad nat) (snd y)) as envTerm) in constructEnvCont k end. 
 Ltac constructEnv := let envBase := fresh "envBase" in let envTerm := fresh "envTerm" in constructEnv' envBase envTerm.
 
-Ltac represent := let envBase := fresh "envBase" in let envTerm := fresh "envTerm" in constructEnv' envBase envTerm; representEnvP envBase envTerm.
-Ltac representNP := let envBase := fresh "envBase" in let envTerm := fresh "envTerm" in constructEnv' envBase envTerm; representEnvPNP envBase envTerm.
+(* First build the env, then use it to proof representability*)
+Ltac represent := match goal with [ |- @representableP ?i ?n ?G ] => let tac k := (let envBase := fresh "envBase" in (pose (@HiddenTerm (nat -> @D i) (fst k)) as envBase); representEnvP envBase (snd k)) in constructEnvCont tac end.
+Ltac representNP := match goal with [ |- @representableP ?i ?n ?G ] => let tac k := (let envBase := fresh "envBase" in (pose (@HiddenTerm (nat -> @D i) (fst k)) as envBase); representEnvPNP envBase (snd k)) in constructEnvCont tac end.
+(*Ltac representNP := let envBase := fresh "envBase" in let envTerm := fresh "envTerm" in constructEnv' envBase envTerm; representEnvPNP envBase envTerm.*)
 

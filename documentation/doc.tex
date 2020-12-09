@@ -1,0 +1,303 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[english]{babel}
+\usepackage[T1]{fontenc}
+\usepackage{microtype}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{xifthen}
+\usepackage{scalerel}
+\usepackage{booktabs}
+\usepackage{amsthm}
+\usepackage{graphicx}
+\usepackage{censor}
+\usepackage{listings}
+\usepackage{nopageno} 
+\usepackage{titlesec}
+\usepackage{subcaption}
+\usepackage{mathtools}
+\usepackage{ stmaryrd }
+\usepackage{hyperref}
+\usepackage{tikz}
+\usetikzlibrary{matrix}
+\usepackage{csquotes}
+\usepackage{lastpage}
+\usepackage{tocloft}
+\usepackage{multirow}
+\usepackage[parfill]{parskip}
+\usepackage[left=2cm,right=2cm,top=2cm,bottom=2cm]{geometry}
+\usetikzlibrary{automata,positioning,arrows.meta,calc,decorations.markings}%for start arrow
+\usepackage{bussproofs}
+\EnableBpAbbreviations
+\usepackage{adjustbox}
+
+\newcommand{\mi}{\mathit}
+\newcommand{\pp}[0]{\mathfrak{p}}
+\newcommand{\PP}[0]{\mathbb{P}}
+\newcommand{\NN}[0]{\mathbb{N}}
+\newcommand{\ZZ}[0]{\mathbb{Z}}
+\newcommand{\RR}[0]{\mathbb{R}}
+\newcommand{\QQ}[0]{\mathbb{Q}}
+\newcommand{\OO}[0]{\mathcal{O}}
+\newcommand{\goed}{\text{göd}}
+\newcommand{\im}{\text{im}\;}
+\newcommand{\dom}{\text{dom}\;}
+\newcommand{\REC}{\mathsf{REC}}
+\newcommand{\RE}{\mathsf{RE}}
+\newcommand{\coRE}{\mathsf{co\text-RE}}
+\newcommand{\Poly}{\mathsf{P}}
+\newcommand{\NP}{\mathsf{NP}}
+\newcommand{\coNP}{\mathsf{co\text-NP}}
+\newcommand{\leqP}{\leq_{\text{P}}}
+\newcommand{\Time}{\mathsf{Time}}
+\newcommand{\trans}[3]{#1 \xrightarrow{#2} #3}
+\newcommand{\utrans}[4]{#1 \xrightarrow{#2}_{#4} #3}
+\newcommand{\nottrans}[3]{#1 \not\xrightarrow{#2} #3}
+\newcommand{\Traces}[1]{\mathit{Traces}\llbracket #1 \rrbracket}
+\newcommand{\Reach}[0]{\mathit{Reach}}
+\newcommand{\Pre}[0]{\mathit{Pre}}
+\newcommand{\Post}[0]{\mathit{Post}}
+\newcommand{\Act}[0]{\mathit{Act}}
+\newcommand{\TTraces}[1]{\mathit{TTraces}\llbracket #1 \rrbracket}
+\newcommand{\xrightsquigarrow}[1]{\overset{#1}{\rightsquigarrow}}
+\newcommand{\link}[1]{\href{#1}{#1}}
+\tikzset{n/.style={draw, circle, thick, inner sep=1mm}, l/.style={draw, rounded corners=1mm, thick, inner sep=1mm}, e/.style={shorten >=1mm, shorten <=1mm, thick, ->}, every initial by arrow/.style={thick, ->}, i/.style={initial, initial text={}}, node distance=2.0cm}
+\newenvironment{graph}[1][]{\vspace{1mm}\begin{tikzpicture}[auto, every loop/.style={e}, #1]}{\end{tikzpicture}\vspace{1mm}}
+\DeclareMathOperator*{\bigplus}{\scalerel*{+}{\sum}}
+
+\newcommand{\TextRuleName}[1]{\LeftLabel{{\footnotesize\textsf{#1}}}}
+\newcommand{\DisplayScaledProof}{\maxsizebox{\linewidth}{!}{\DisplayProof}}
+
+
+\lstdefinelanguage{pseuCo}{
+	morekeywords={select, case,stringchan,return,true,false,struct,new,while},
+	sensitive,%
+	morecomment=[n]{(*}{*)},%
+	morestring=[d]",%
+	literate=%
+	{>}{{$>$}}{1}
+	{<}{{$<$}}{1}
+	{=}{{$=$}}{1}
+	{+}{{$+$}}{1}
+	{~}{{$\sim$}}{1}
+	{->}{{$\rightarrow$}}{2}
+	{=>}{{$\Rightarrow$}}{2}
+	{:=}{{$\coloneqq$}}{2}
+	{'a}{{$\alpha$}}{2}
+	{'b}{{$\beta$}}{2}
+	{'c}{{$\gamma$}}{2}
+	{'d}{{$\delta$}}{2}
+	{'e}{{$\varepsilon$}}{2}
+	{ö}{{\"o}}1
+	{ä}{{\"a}}1
+	{ü}{{\"u}}1
+	{Ö}{{\"O}}1
+	{Ä}{{\"A}}1
+	{Ü}{{\"U}}1
+	{ß}{{\ss}}1
+}
+
+\lstdefinestyle{listing}{	
+	basicstyle=%
+	\scriptsize\ttfamily
+	\lst@ifdisplaystyle\footnotesize\fi,
+	columns=fixed,
+	basewidth={0.6em, 0.55em},
+	frame=lines,
+	%	autogobble=true,
+	numbers=left,
+	numberstyle=\tiny,
+	stepnumber=1,
+	numbersep=5pt,
+	breaklines=true,
+	breakindent=5pt,
+	breakautoindent=true,
+	postbreak={\mbox{\rotatebox[origin=c]{180}{$\Lsh$}\space}},
+	keywordstyle=\color{blue}\bfseries,
+	commentstyle=\color{purple}\ttfamily,
+	%stringstyle=\color{red}\ttfamily,
+	stringstyle=\ttfamily
+}
+\lstset{style=listing, language=pseuCo}
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\setlength{\headheight}{14pt} 
+\rhead{First-Order Reification with MetaCoq}
+\lhead{}
+\chead{Johannes Hostert}
+\cfoot{Page \thepage\ / \pageref{LastPage}}
+
+\author{Johannes Hostert}
+\title{First-Order Reification with MetaCoq}
+
+\begin{document}
+	\maketitle
+	\tableofcontents
+	\newpage
+\section{Scope and overview}
+The Programming Systems group is working on first-order systems in Coq. They define the syntax of first-order logic in a reusable way that allows one to quickly define new instances (i.e. first-order peano arithmetics or ZF set theory). From the syntax they can then also automatically derive a semantics by assuming a general model, which has functions being the in-model representations of the syntactic functions defined as part of the theory. Proofs about the theory can then be done by proving things in the model.
+
+For this, it is often necessary to show that certain statements or terms about objects in the model are \enquote{representable}, meaning that they also are statements in the original theory of which we have a model. We present here a MetaCoq libary for automatically finding the syntactic representations of (semantic) statements about the model,  along with proofs that they are indeed correct. The library operates on the syntactic representation of the semantic statements of the model and can be extended to reflect/reify other terms not covered by the standard syntactic constructions.
+
+We call a statement representable if the is an environment and a syntactic first-order form so that evaluating the syntactic form in the environment yields something equivalent to the original term. A similar definition is used for terms. When constructing the syntactic form, we will call it reification.
+\section{Applicable models of a first-order theory}
+The system used by the PS group defines evaluation function for the syntax of a first-order theory. These evaluation functions operate on a generic type which has an \lstinline|interp|, which provides an interpretation for specific arithmetical and logical connectives. For basic logical connectives (and, or, forall-quantification) which are independent of the specific first-order theory, the standart Coq logical connectives are used.
+
+Theories are defined by giving a type of \enquote{term symbols}, from which terms can be build (for PA, these are $O$, $S$, $+$ and $\cdot$), as well as \enquote{form symbols}, which create atomic properties (e.g. $\in$ for ZF, or $=$ for PA). Both have an associated arity and induce functions \lstinline|Vector.t <arity> term -> form/term| dependingly.
+
+When assuming a model, one assumes a type \lstinline|D|, an \lstinline|interp D|, which provides a semantic function for each of the form/term symbols, by giving a function \lstinline|Vector.t <arity> D -> D/Prop|, and a proof that this model fulfills all the axioms of one's theory. These functions also define operations on the points of \lstinline|D|. Now, it is significantly simpler to prove statements about the points of \lstinline|D|, partially constructed using these operations derived from the interpretation of syntactic first-order symbols.
+
+However, since we are in first-order arithmetic, the collection of axioms is often infinite, because some axioms are axiom schemas (e.g. the induction axiom of PA), into which an arbitrary statement of the theory must be substituted first. Therefore, when doing a proof in our model which requires use of such an axiom schema, we must first show that we can actually represent the statement (about points of \lstinline|D|) which we want to prove using the first-order syntax. For large statements, proving this is significant work, even though it is actually repetitive. This library automates that task.
+\newpage
+\section{Usage}
+The libary defines two type classes, for which instances must/may be given:
+\begin{lstlisting}
+  Class tarski_reflector := {
+	fs : funcs_signature; 
+	ps : preds_signature; (* ps and fs give the syntax *)
+	D  : Type;
+	I  : @interp fs ps D; (* D and I give our model *)
+	emptyEnv : nat -> D;  (* We need an "empty" env that returns some default value for our types *)
+	isD : Ast.term -> bool;  (* Returns true iff the given term references D used above *)
+}. 
+(* Extension point to extend the libary to more syntactic constructs *)
+Class tarski_reflector_extensions (t:tarski_reflector) := {
+	baseLogicConnHelper : option (string -> baseConnectiveReifier); 
+	baseLogicVarHelper : option (string -> baseConnectiveVars);                 (* for reifying instances of inductive types Coq.Init.Logic.* applied to arguments. Mostly used for reifying eq *)
+	termReifierVarHelper : option termFinderVars;    
+	termReifierReifyHelper : option termFinderReifier;                          (* for reifying all terms that we fail to reify *)
+	formReifierVarHelper : option propFinderVars;
+	formReifierReifyHelper : option propFinderReifier                           (* for reifying all forms that we fail to reify *)
+}.
+\end{lstlisting}
+The \lstinline|tarski_reflector| class is crucial and contains a complete the description of the theory's syntax and the corresponding model. It can be constructed using the \lstinline|buildDefaultTarski| helper, which can derive the first for members, and constructs a default env from any given point of \lstinline|D|. The \lstinline|isD| must be manually provided. Here is a typical declaration:
+\begin{lstlisting}
+Variable D' : Type.
+Context {I : interp D'}.
+Instance PA_reflector : tarski_reflector := buildDefaultTarski (i_f (f:=Zero) (Vector.nil D')) (fun k => match k with (tVar "D'") => true | _ => false end).
+\end{lstlisting}
+This example is taken from a peano arithmetic development - the point therefore is the semantic representation of zero. Other developments might use the representation of the empty set or just assume that the model is nonempty.
+
+Now, one typically defines notations that ease applying the semantic and syntactic connectives, like this (again taken from a PA development. \lstinline|Succ| and \lstinline|Zero| are constructos of the \lstinline|funcs_signature|, \lstinline|Eq| is from the \lstinline|preds_signature| instance.):
+\begin{lstlisting}
+(* Syntactic connectives *)
+Notation zero := (func Zero (Vector.nil term)).
+Notation "succ x" := (func Succ (Vector.cons x (Vector.nil term))) (at level 37).
+Notation "x '==' y" := (atom Eq (Vector.cons term x 1 (Vector.cons term y 0 (Vector.nil term))) ) (at level 40).
+(* Semantic connectives *)
+Notation iZero := (@i_f _ _ D' I Zero (Vector.nil D')).
+Notation "'iSucc d" := (@i_f _ _ D' I Succ (Vector.cons d (Vector.nil D'))) (at level 37).
+Notation "x 'i=' y" := (@i_P _ _ D' I Eq (Vector.cons x (Vector.cons y (Vector.nil D')))) (at level 40).
+\end{lstlisting}
+
+For complicated reasons, it is crucial to use exactly the type of the model, and not \lstinline|D|. This is because the notations should already be reduced and not change when one uses to e.g. \lstinline|cbn.|
+
+One can now use the tactic \lstinline|represent| and its siblings on goals like \lstinline|representableP 0 (forall d, d i= iO)|. The \lstinline|0| means that the second argument is a function with 0 arguments (i.e. just \lstinline|Prop|). Alternatively, one could have \lstinline|representableP 2 (fun a b => a i= b)|, which means that the binary equality predicate is representable.
+\subsection{Tactics}
+The basic tactic one wants to use is \lstinline|represent|. It automatically constructs a suitable instance of an environment, and a syntactic form of the theory, and the proves that this is equivalent to the given statement. There also is \lstinline|representNP|, which elides the proof and hopes that the given first-order reification, when instantiated into \lstinline|sat|, is computationally equal to the given statement - trying to close the goal with easy. If it fails to do so, the user must close the proof themselves.
+Then there are \lstinline|constructEnv|, which constructs the environment as well as the \enquote{MetaCoq helper} that tells the reification utils what term is bound where in the environment.
+The most basic (and most powerful) tactic is \lstinline|representEnvP| (as well as its non-proof sibling \lstinline|representEnvPNP|), which needs to be given an environment and the \enquote{MetaCoq helper}, and can then derive a term as well as a proof. This can be used if one wants to use a specific environment.
+
+Note that these tactics only work on goals of the form \lstinline|representableP <number> <term to reify>|, because an implicit argument is used to infer the instance of type class \lstinline|tarski_reflector|.
+
+\subsection{Non-proof mode}
+Constructing the proof of correctness along with the syntactic reification leads to a significant increase in run-time. We could not figure out why this happens since it is a syntactic operation similar to the derivation of the proof, but since the derived proof is often trivial, we included no-proof mode so that the proof can be elided and be given by something like \lstinline|easy|. Users are encouraged to first try closing a goal with non-proof mode, and if that fails, use the more powerful tactic.
+\newpage
+\section{Inner workings}
+When looking at the code, you will often find seemingly-identical versions of two functions/definitions, where one is suffixed with \lstinline|NP|. These are indeed similar, the one tagged with \lstinline|NP| just elides the proof, as mentioned.
+
+The basic idea is to pattern-match on various syntactic construct in the MetaCoq-quoted term. The two main functions that do this are \lstinline|findTermRepresentation| and \lstinline|findPropRepresentation|. The former matches on terms (terms are things that have type \lstinline|D| (semantically) or \lstinline|term| (syntactically)), the latter on forms (of type \lstinline|Prop|/\lstinline|form|). These call various helper methods which construct a quoted reification and a quoted proof term. While the process is written to be structurally recursive, it is extensible and thus many functions are instead written structurally recursive on some fuel.
+
+\subsection{finding term representations}
+The type of \lstinline|findTermRepresentation| is \lstinline|Ast.term ->nat ->Ast.term ->Ast.term ->(Ast.term -> FailureMonad nat) -> FailureMonad (pair Ast.term Ast.term)|. There are two additional arguments, namely a \lstinline|tarski_reflector| and a corresponding
+\lstinline|tarski_reflector_extensions|. These are context arguments in the source code. Here is a description of the other arguments:
+\begin{enumerate}
+\item The previous \lstinline|tarski_reflector|, quoted.
+\item The fuel. If it is 0, we stop.
+\item The actual term to reify.
+\item The env term, quoted This is the environment which will be used in the representability proof (the first thing constructed by the \lstinline|createEnv| tactic). The default argument is the \enquote{empty} environment which returns an arbitrary point for all inputs.
+\item A function that, for a given part of a term, yields the index that term has in the env term. The default argument fails for all inputs. This function is called when we reach a term that we cannot represent otherwise, like \lstinline|tRel n|. We then look where \lstinline|tRel n| is in the environment (let's say at position \lstinline|k|) and then \lstinline|var k| is the representative, and \lstinline|eq_refl| the proof.
+\end{enumerate}
+We then return a pair consisting of the quoted reification and a quoted proof of its correctness.
+
+The function only does three things:
+\begin{enumerate}
+\item Check if the term is a semantic connective (e.g. \lstinline|S|, \lstinline|O|, \lstinline|+| in PA). In this case we recursively find a representation of the subterms and connect them using the syntactic reifier.
+\item Call the extension point.
+\item Look up the environment.
+\end{enumerate}
+If neither of these yield a reification, we fail.
+\subsection{finding form representations}
+As before, we discuss the arguments. Note that the same 2 context-arguments we had before are also present.
+\begin{enumerate}
+\item As before, \lstinline|tarski_reflector|, quoted.
+\item The fuel. If it is 0, we stop.
+\item The actual term to reify.
+\item The \enquote{frees}. When trying to prove something like \lstinline|representableP frees P|, the \lstinline|frees| used there. We use it to first \enquote{introduce} the \lstinline|n| free variables required. Afterwards, it is mostly 0, except when reifying the existential quantifier, where it is 1.
+\item The env term, quoted, as above.
+\item The env lookup term, as above.
+\end{enumerate}
+We again return a pair consisting of reification and proof.
+
+Here, we match a few more constructs
+\begin{enumerate}
+	\item Base logical connectives. A base logical connective is an inductive type from \lstinline|Coq.Init.Logic|. In this case we call a base logical connective handler which does further delegation/recursion/extension point calling.
+	\item Semantic connectives (atoms, e.g. \lstinline|=| or $\in$ in PA/ZF). We then recursively reify the subterms and build a proof.
+	\item As a special case, we handle the \lstinline|iff| (\lstinline|<->|), which is defined in \lstinline|Coq.Init.Logic| but not an inductive type.
+	\item Handling \lstinline|->|. Since \lstinline|->| is just notation for a product type, we must check whether a product type quantifies over \lstinline|D|. If that is the case, we are reifying a forall quantifier, otherwise we are reifying an implication. In the latter case we must adjust indices of the implied statement since it is inside a product term, but should not be.
+	\item If the \lstinline|frees| is $>0$, we introduce a variable.
+	\item We call the extension point.
+\end{enumerate}
+If none of these cases matches, we fail.
+\subsubsection{Base logical connectives}
+We merge the handling of different \enquote{base logical connectives}, by which we mean inductive types defined in \lstinline|Coq.Init.Logic|. For each of these we handle, we define a function that yields the reification as well as one that yields a proof that the reification is correct. These are then instantiated with the correct sub-reifications (and their proofs). Finally, we have a function that calls the correct case based on the connective name, (e.g. given \lstinline|"and"|, we use \lstinline|reifyAnd|).
+
+The arguments are as follows:
+\begin{enumerate}
+	\item As before, \lstinline|tarski_reflector|, quoted.
+	\item The list of all the arguments the original inductive type was specialized with
+	\item fuel
+	\item env term
+	\item env helper
+	\item A reduced-argument recursive-call-helper variant of \lstinline|findPropRepresentation|, where the first and second arguments are chosen appropriately.
+	\item A reduced-argument recursive-call-helper variant of \lstinline|findTermRepresentation|, where the first and third argument are chosen appropriately.
+\end{enumerate}
+Again, the return value is a pair of a reified term and a correctness proof.
+\subsection{Building correctness proofs and reifiers}
+The individual reification helpers mainly call the recursive function and then plug the resulting partial terms/proofs into a \enquote{merge helper} which then builds a next larger proof. These merge helpers are written to accept the right amount of arguments in a specific order. Building the actual MetaCoq term is this easy since we simply use \lstinline|tApp|. The actual proof can be done in the merge helpers in the usual way. The merge helpers for base logical connectives should be straightforward. For the connectives that are part of the syntax of the specific logic, an interesting solution was found that, given the respective connective specifier (i.e. a member of \lstinline|funcs_signature| or \lstinline|preds_signature|), then accepts a varying number of arguments so that we do not need to build a vector in MetaCoq terms. An extended version of this also builds the correctness proofs.
+\newpage
+\section{Building the environment}
+It is often necessary to build a specific environment in order to show representability. For example, consider the statement \lstinline|forall d:D, representableP 0 (iZero i= d)|. This can be represented by the syntactic form $zero == \$0$ in the environment $$env(x) = \begin{cases}
+0&x=0\\
+\text{undefined}&otw.
+\end{cases}$$
+
+However, we need to build the environment to contain \lstinline|d| and know at which index it is placed.
+
+For this we have functions similar to the ones already outlined, except that they don't yield reifications, but rather a list of all unbound variables. These can then be stitched together into an environment. The arguments of the unbound variable finding functions are similar to the arguments of the functions they mirror, except that typically the env terms are not there.
+\newpage
+\section{Extension points}
+The out-of-the-box reifier can reify the outlined semantic connectives of the theory, as well as forall and existential quantification and the logical and/or/implication/equivalence/truth/falsity constructs and variables. This should be sufficient for smaller terms. However, it requires one to only construct ones terms from the basic syntactic constructs available. This is not sufficient, because one might add more complicated additional terms or forms. (For example, one might consider having a function \lstinline|repNat:nat -> D|, which constructs a term representing a natural number (i.e. by building the von Neumann set in ZF). One can then have another function \lstinline|synNat:nat -> term|, which builds a term for the same number in the syntactic theory. If we work in places where the argument is arbitrary, they cannot be reified.)
+
+To solve this, the user can declare an instance of the \lstinline|tarski_reflector_extensions| class. This will be used as a fallback if the existing development fails to find a reification. In this, there are two fields for each extension point, which should both be filled. Unused extension points should be declared with \lstinline|None|. The three extension points are outlined here. One of the two fields is used during the env building stage, the other during the actual reification.
+
+Extension points are given the mostly the same arguments as the functions they are extending -- what is missing are the implicit context arguments as well as the fuel. They also get recursion helpers to compute the problem for subparts of the original expression. Recursion helpers are used because otherwise the extension point would need to supply the original function with the extension point class instance, which of course does not already exist (in fact, this would likely lead to a proof of falsity).
+\subsection{Base logical connective}
+The main point of this extension point is to reify Coq's inbuilt equality, if one uses a model where this is a suitable representation. Most other inductive types defined here are already covered and not handled by the extension point. The extension point takes as arguments the name of the base logical connective (the last part of \lstinline|Coq.Init.Logic.xxx|), the list of arguments, the fuel, the env term and env helper (not during env building) the quoted \lstinline|tarski_reflector| instance, the recursion helper for \lstinline|findPropRepresentation|, and the one for \lstinline|findTermRepresentation|
+\subsection{Term reification}
+This extension point is called when term reification does not match a semantic connective. The arguments are the quoted instance, the fuel, the term to reify, the env term and env helper (not during env building) and a reflection helper for \lstinline|findTermRepresentation|
+\subsection{Form reification}
+Called when form reification fails. Arguments: quoted instance, fuel, actual term, frees, env term, env helper, reflection helpers for \lstinline|findTermRepresentation| and \lstinline|findPropRepresentation|.
+
+
+When called in no-proof mode, the second element of the tuple returned by the reflection helpers will be the dummy term \lstinline|noProofDummy|. Whatever the user returns in the second entry of the return from the extension point is discarded. This design allows the user to always build a proof, and as long as the proof is not part of the term itself, things will work.
+\newpage
+\section{Design choices}
+This library perfoms reflection based on the syntactic layout of the Coq term. This implies, of course, that it is very easy to break this by simply hiding the term one wants reified behind definitions. Users have to be careful to only define things as notations, in order to not break the syntax matching (or write a custom extension point for their added functions).
+
+We handle the environment in a seperate pass because the initial use case did not expect environments, and because recursively constructing the proof and the environment would lead to several issues.
+
+Since one use case has an ad-hoc definition of equality (by assuming that Coq's inbuilt equality and the equality you get by semanically interpreting the syntactic connective that is part of the theory are equal), we originally set out to reify with a proof in order to correctly handle equality. However, since that turned out to be slow (for unknown reasons), and because a prototype once had worked this way, we added no-proof mode in order to make this more efficient.
+\end{document}

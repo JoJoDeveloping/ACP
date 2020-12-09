@@ -53,7 +53,7 @@ Instance PA_preds_signature : preds_signature :=
  
 Arguments Vector.cons {_} _ {_} _, _ _ _ _.
 
-Definition zero := func Zero (Vector.nil term).
+Notation zero := (func Zero (Vector.nil term)).
 Notation "'σ' x" := (func Succ (Vector.cons x (Vector.nil term))) (at level 37).
 Notation "x '⊕' y" := (func Plus (Vector.cons x (Vector.cons y (Vector.nil term))) ) (at level 39).
 Notation "x '⊗' y" := (func Mult (Vector.cons x (Vector.cons y (Vector.nil term))) ) (at level 38).
@@ -109,19 +109,11 @@ Section Models.
 
   Variable D' : Type.
   Context {I : interp D'}.
-  (*Instance PA_reflector : tarski_reflector := buildDefaultTarski (i_f (f:=Zero) (Vector.nil D')) (fun k => match k with (tVar "D'") => true | _ => false end)*)
- 
-  
-  
-
+  (* Careful: Define this with implicit arguments being maximally evaluated. So use D' and 2, not D or (ar_syms Eq) *)
   Definition Equality := forall v, @i_P _ _ D' I Eq v <-> Vector.hd v = Vector.hd (Vector.tl v). 
-  Hypothesis equality : forall v, @i_P _ _ D' I Eq v <-> Vector.hd v = Vector.hd (Vector.tl v).
+  Hypothesis equality : forall v:Vector.t D' 2, @i_P _ _ D' I Eq v <-> Vector.hd v = Vector.hd (Vector.tl v).
 
-
-  Instance PA_reflector : tarski_reflector := {
-    emptyEnv := (fun _:nat => (i_f (f:=Zero) (Vector.nil D')));
-    isD := (fun k => match k with (tVar "D'") => true | _ => false end);
-  }.
+  Instance PA_reflector : tarski_reflector := buildDefaultTarski (i_f (f:=Zero) (Vector.nil D')) (fun k => match k with (tVar "D'") => true | _ => false end).
   (* The following predicate expresses that a model satisfies the minimal axioms of PA i.e. all axioms except S x <> 0 *)
   Definition sat_PA_minimal_axioms :=
     forall rho,
@@ -148,35 +140,51 @@ Section Models.
   Proof.
     intros rho a b c. cbn. rewrite !equality. cbn. intros [C B]. now rewrite C, B.
   Qed.
-
-  Notation iO := (i_f (f:=Zero) (Vector.nil D)).
-  Notation "'iσ' d" := (i_f (f:=Succ) (Vector.cons d (Vector.nil D))) (at level 37).
-  Notation "x 'i⊕' y" := (i_f (f:=Plus) (Vector.cons x (Vector.cons y (Vector.nil D)))) (at level 39).
-  Notation "x 'i⊗' y" := (i_f (f:=Mult) (Vector.cons x (Vector.cons y (Vector.nil D)))) (at level 38).
-  Notation "x 'i=' y" := (i_P (P:=Eq) (Vector.cons x (Vector.cons y (Vector.nil D)))) (at level 40).
+  Check @i_f.
+  Notation iO := (@i_f PA_funcs_signature PA_preds_signature D' I Zero (Vector.nil D')).
+  Notation "'iσ' d" := (@i_f _ _ D' I Succ (Vector.cons d (Vector.nil D'))) (at level 37).
+  Notation "x 'i⊕' y" := (@i_f _ _ D' I Plus (Vector.cons x (Vector.cons y (Vector.nil D')))) (at level 39).
+  Notation "x 'i⊗' y" := (@i_f _ _ D' I Mult (Vector.cons x (Vector.cons y (Vector.nil D')))) (at level 38).
+  Notation "x 'i=' y" := (@i_P _ _ _ _ Eq (Vector.cons x (Vector.cons y (Vector.nil D')))) (at level 40).
   Definition iμ k := iter (fun x => iσ x) k iO.
-
+Definition k := (iO i= iO).
+Print k.
   Section ReflectionExtension.
+    Definition mergeMu (rho:nat -> D) (n:nat) : representsF (iμ n) (num n) rho.
+    Proof. unfold representsF. induction n.
+    * easy.
+    * cbn. do 2 f_equal. cbn in IHn. now rewrite IHn.
+    Defined.
+    MetaCoq Quote Definition qMu := iμ.
+    MetaCoq Quote Definition qMergeMu := mergeMu.
+    MetaCoq Quote Definition qMergeTermMu := @num.
+    Print qMergeTermMu.
     Definition mergeEqProp (rho:nat -> D) (d1 d2 : D) (t1 t2 : term) : representsF d1 t1 rho -> representsF d2 t2 rho -> @representsP _ 0 (t1==t2) rho (d1 = d2).
-    Proof. intros pt1 pt2. cbn. unfold representsF in pt1, pt2. cbn in pt1, pt2. rewrite pt1, pt2. specialize (equality (Vector.cons d1 (Vector.cons d2 (Vector.nil D')))). cbn in equality. easy.
+    Proof. intros pt1 pt2. cbn. unfold representsF in pt1, pt2. cbn in pt1, pt2. rewrite pt1, pt2. now rewrite equality.
     Defined.
     Definition mEq := (constructForm Eq).
     MetaCoq Quote Definition qMergeFormEq := @mEq.
     MetaCoq Quote Definition qMergeEqProp := mergeEqProp.
-    Definition reifyCoqEq : baseConnectiveReifier := fun tct l fuel envTerm env fPR => match l with [tv; x; y] => if maybeD tct tv then
-                                               xr <- findTermRepresentation tct fuel x envTerm env ;;
-                                               yr<-  findTermRepresentation tct fuel y envTerm env ;; let '((xt,xp),(yt,yp)) := (xr,yr) in
+    Definition reifyCoqEq : baseConnectiveReifier := fun tct l fuel envTerm env fPR fTR => match l with [tv; x; y] => if maybeD tct tv then
+                                               xr <- fTR tct x envTerm env ;;
+                                               yr<-  fTR tct y envTerm env ;; let '((xt,xp),(yt,yp)) := (xr,yr) in
                                                ret (tApp qMergeFormEq ([xt;yt]), tApp qMergeEqProp ([envTerm;x;y;xt;yt;xp;yp])) else fail "Eq applied to wrong type" | _ => fail "Eq constructor applied to != 2 terms" end.
-    Definition varsCoqEq : baseUBVarFinder := fun lst fuel tct _ => match lst with [tv; x; y] => if maybeD tct tv then
-                                               xr <- findUnboundVariablesTerm fuel x;;
-                                               yr <- findUnboundVariablesTerm fuel y;;
+    Definition varsCoqEq : baseConnectiveVars := fun lst fuel tct _ fUVT => match lst with [tv; x; y] => if maybeD tct tv then
+                                               xr <- fUVT x;;
+                                               yr <- fUVT y;;
                                                ret (xr++yr) else fail "Eq applied to wrong type" | _ => fail "Eq constructor applied to != 2 terms" end.
-    Definition reifyBLC (s:string) : baseConnectiveReifier := match s with "eq" => reifyCoqEq | _ => fun _ _ _ _ _ _ => fail ("Unknown connective " ++ s) end.
-    Definition varsBLC (s:string) : baseUBVarFinder := match s with "eq" => varsCoqEq | _ => fun _ _ _ _ => fail ("Unknown connective " ++ s) end.
+    Definition reifyBLC (s:string) : baseConnectiveReifier := match s with "eq" => reifyCoqEq | _ => fun _ _ _ _ _ _ _ => fail ("Unknown connective " ++ s) end.
+    Definition varsBLC (s:string) : baseConnectiveVars := match s with "eq" => varsCoqEq | _ => fun _ _ _ _ _ => fail ("Unknown connective " ++ s) end.
+    Definition findVarsTerm : termFinderVars := fun fuel t fUVT => match t with (tApp qMu ([k])) => ret nil | _ => fail "Fail" end.
+    Definition reifyTerm : termFinderReifier := fun tct fuel t envTerm env fTR => match t with tApp qMu ([k]) => ret (tApp qMergeTermMu ([k]), tApp qMergeMu ([envTerm;k])) | _ => fail "Fail" end.
   End ReflectionExtension.
   Instance PA_reflector_ext : tarski_reflector_extensions PA_reflector := {| (*Cannot define instance in section because they are dropped afterwards *)
     baseLogicConnHelper := Some (reifyBLC);
-    baseLogicVarHelper := Some (varsBLC)
+    baseLogicVarHelper := Some (varsBLC);
+    termReifierVarHelper := Some (findVarsTerm);
+    termReifierReifyHelper := Some (reifyTerm);
+    formReifierVarHelper := None;
+    formReifierReifyHelper := None
   |}.
  
   (* Test cases *)
@@ -232,16 +240,16 @@ Section Models.
   (* Test cases NP*)
   Goal (representableP 0 (iO i= iO)).
   Time representNP.
-  Qed.
+  Time Qed.
   Goal (representableP 0 (forall d, d i= iO)).
   Time representNP.
-  Qed.
+  Time Qed.
   Goal (representableP 2 (fun a b => a i= b)).
   Time representNP. 
-  Qed.
+  Time Qed.
   Goal (representableP 2 (fun (d e :D) => forall g, exists j, g i= d i⊕ j /\ False -> False \/ (e i⊗ iO i= iσ j /\ False))).
   Time representNP.
-  Qed.
+  Time Qed.
   Goal (representableP 0 (forall a b, a i= b)).
   Time representNP. 
   Time Qed.
@@ -279,13 +287,22 @@ Section Models.
   Time representNP.
   Time Qed.
 
+  Goal (forall n:nat, representableP 1 (fun a => a i= iμ n)).
+  intros n. Time represent. Show Proof.
+  Time Qed.
+
   Goal forall (d e:D), representableP 0 (d i= e).
   intros d e. representNP.
   Qed.
-
-  Goal forall (d e:D), representableP 0 (d = e).
-  intros d e. Fail representNP; easy. represent.
+  Goal forall (d e:D), representableP 0 (d = e <-> True).
+  intros d e. represent. Show Proof.
   Qed.
+  Goal forall (d e:D), representableP 0 (d i= e <-> False).
+  intros d e. representNP. Show Proof.
+  Qed.
+  Goal forall (d e:D), representableP 0 (d = e <-> True).
+  intros d e. representNP. cbv in rep. unfold HiddenTerm, fst in envBase. Show Proof.
+  Abort.
 
 
 
@@ -400,7 +417,7 @@ Section Models.
   Proof.
     apply PAinduction. represent.
     - now left.
-    - intros d [<- |]; right. pose iO. now exists d. now exists d.
+    - intros d [<- |]; right. now exists iO. now exists d.
   Qed.
 
   Lemma add_rec_right :
@@ -414,7 +431,6 @@ Section Models.
     
   
   Section TrivialModel.
-
     Variable Bot : iμ 0 = iμ 1.
     
     Lemma ModelHasOnlyZero' rho : rho ⊨ (∀ $0 == zero).
