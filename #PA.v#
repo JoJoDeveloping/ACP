@@ -198,7 +198,7 @@ Print k.
   Time represent. 
   Qed.
   Goal (representableP 2 (fun (d e :D) => forall g, exists j, g i= d i⊕ j /\ False -> False \/ (e i⊗ iO i= iσ j /\ False))).
-  Time representNP.
+  Time representNPFas.
   Qed.
   Goal (representableP 0 (forall a b, a i= b)).
   Time represent. 
