@@ -8,19 +8,25 @@ Require Import Tarski.
 Require Import VectorTech.
 Require Import Lia.
 
+(** * Reification
+      Please read the PDF file giving a detailed description.
+      
+      We are given a Coq term and try to find a reification of it in the syntax of a specific kind of first-order theory. *)
 Section FailureMonad.
-  (* Our monad for creating proper error messages. *)
+  (** ** FailureMonad
+      Since our function is partial, and we want to give helpful error messages to the User, we use this monad, which represents either success or failure, along with an error message
+  *)
   Inductive FailureMonad (A:Type) : Type := ret : A -> FailureMonad A | fail : string -> FailureMonad A.
   Arguments ret {_} _.
   Arguments fail {_} _.
   Definition bind {A B : Type} (k:FailureMonad A) (f:A -> FailureMonad B) := match k return FailureMonad B with fail x => fail x | ret k => f k end.
   Notation "x <- c1 ;; c2" := (bind c1 (fun x => c2)).
-  (* "Converts" from our monad to the TemplateMonad of MetaCoq. This is used to pass error messages back to the user *)
+  (** "Converts" from our monad to the TemplateMonad of MetaCoq. This is used to pass error messages back to the user *)
   Definition f2t {T:Type} (a:FailureMonad T) : TemplateMonad T := match a with ret k => monad_utils.ret k | fail s => tmFail s end.
-  (* Structurally recursive definition of a monadic map *)
+  (** Structurally recursive definition of a monadic map *)
   Fixpoint flatten_monad {A:Type} (l:list (FailureMonad A)) : FailureMonad (list A) := match l with nil => ret nil | x::xr => xm <- x;; xrm <- flatten_monad xr;; ret (xm::xrm) end.
   Definition map_monad {A B:Type} (f:A -> FailureMonad B) (l:list A) : FailureMonad (list B) := flatten_monad (map f l).
-  (* If the first monad fails, use the second. Used to cascade failure handling *)
+  (** If the first monad fails, use the second. Used to cascade failure handling *)
   Definition orelse {A:Type} (F1 F2 :FailureMonad A) := match F1 with fail _ => F2 | _ => F1 end.
 End FailureMonad.
 
@@ -31,7 +37,9 @@ Notation "x <- c1 ;; c2" := (bind c1 (fun x => c2)).
 Arguments Vector.cons {_} _ {_} _, _ _ _ _.
 
 Section MetaCoqUtils.
-  (* Working with quoted vectors *)
+  (** ** MetaCoqUtils
+         Here, we define various useful functions for working with MetaCoq terms *)
+  (*+ Working with quoted vectors *)
   Notation vectorCons x T n xr := 
   (tApp
    (tConstruct
@@ -52,14 +60,14 @@ Section MetaCoqUtils.
   | _ => ffail
   end.
 
-  (* General utils for quoted terms *)
-  (* Remove the n first elements from a list *)
+  (** *** General utils for quoted terms *)
+  (** Remove the n first elements from a list *)
   Existing Instance config.default_checker_flags.
   Fixpoint popNElements (l : list Ast.term) (n:nat) : option (list Ast.term) := match (l,n) with
     (a,0) => Some a
   | (x::xr, S n) => popNElements xr n
   | _ => None end.
-  (* If ls is a valid prefix of l, return the corresponding "suffix" (the remaining elements of l). Otherwise, return None *)
+  (** If ls is a valid prefix of l, return the corresponding "suffix" (the remaining elements of l). Otherwise, return None *)
   Fixpoint popListStart (l : list Ast.term) (ls : list Ast.term) : option (list Ast.term) := match (l,ls) with
     (a,nil)=> Some a
   | (lx::lxr, lsx::lsxr) => if Checker.eq_term init_graph lx lsx then popListStart lxr lsxr else None
@@ -67,10 +75,10 @@ Section MetaCoqUtils.
   MetaCoq Quote Definition qNatZero := 0.
   MetaCoq Quote Definition qNatSucc := S.
   MetaCoq Quote Definition qeq_refl := (@eq_refl).
-  (* Given n, yield a MetaCoq Ast.term representation of n *)
+  (** Given n, yield a MetaCoq Ast.term representation of n *)
   Fixpoint quoteNumber (n:nat) : Ast.term:= match n with 0 => qNatZero | S n => tApp qNatSucc ([quoteNumber n]) end.
 
-  (* Increases the indices of all tRel in t by amnt, assuming they are already larger than minn. If minn = 0, this increases all "free" tRel reference indices *)
+  (** Increases the indices of all tRel in t by amnt, assuming they are already larger than minn. If minn = 0, this increases all "free" tRel reference indices *)
   Fixpoint addRelIndex (minn:nat) (amnt:nat) (t:Ast.term) : Ast.term := match t with
     tRel n => if Compare_dec.le_gt_dec minn n then tRel (amnt+n) else tRel n
   | tVar k => tVar k
@@ -91,7 +99,7 @@ Section MetaCoqUtils.
   end.
   Definition map_def_monad {A B : Type} (tyf bodyf : A -> FailureMonad B) (d:def A) : FailureMonad (def B) := dtr <- tyf (dbody d);;dbr <- bodyf (dbody d);; 
                                                                                                             ret {| dname := dname d; dtype := dtr; dbody := dbr; rarg := rarg d |}.
-  (* Inverse operation to addRelIndex. Can fail, if the term for instance contains a tRel 0, which would need to be lowered to tRel (-1), which does not exist *)
+  (** Inverse operation to addRelIndex. Can fail, if the term for instance contains a tRel 0, which would need to be lowered to tRel (-1), which does not exist *)
   Fixpoint lowerRelIndex (minn:nat) (tv:FailureMonad Ast.term) (t:Ast.term) {struct t}: FailureMonad Ast.term := match t with
     tRel n => if Compare_dec.le_gt_dec minn n then if Compare_dec.le_gt_dec minn (S n) then ret (tRel (match n with 0 => 0 | S n => n end)) else tv else ret (tRel n)
   | tVar k => ret (tVar k)
@@ -113,24 +121,65 @@ Section MetaCoqUtils.
 End MetaCoqUtils.
 
 Section AbstractReflectionDefinitions.
-  (* Types used for extension points *)
+  (** ** AbstractReflectionDefinitions
+         Here, we define basic terms and types used when reifying *)
+  (** Type of term reification helper, which is given to extension points / base connective reifier.
+      The arguments are:
+      - tct:Ast.term -- the current instance of the tarski_reflector, quoted
+      - t:Ast.term -- the actual term to be reified
+      - envTerm:Ast.term -- the env we are reifying into, quoted
+      - env: -- a helper, which gives the env index for Coq terms
+      - returning a pair of the reified term and a proof that it is correct, both quoted *)
   Definition helperTermReifierType := (Ast.term -> Ast.term -> Ast.term -> (Ast.term -> FailureMonad nat) -> FailureMonad (prod Ast.term Ast.term)).
+  (** The same, but used during the env constructing phase. The only arg is the term itself *)
   Definition helperTermVarsType := (Ast.term -> FailureMonad (list Ast.term)).
+  (** Similar, but this helper is used to reify terms, not forms. Args:
+      - tct -- as above
+      - frees:nat -- when reifying a nary predicate, this is n.
+      - t:Ast.term -- the actual term/form to be reified
+      - envTerm -- as above
+      - env -- as above
+      - returning again a apair of reified term and proof *)
   Definition helperFormReifierType := (Ast.term -> nat -> Ast.term -> (Ast.term -> FailureMonad nat) -> FailureMonad (prod Ast.term Ast.term)).
   Definition helperFormVarsType := (Ast.term->nat->FailureMonad (list Ast.term)).
+  (** A base connective is an inductive in Coq.Init.Logic, like and. They are common and have their own subsystem. Arguments:
+      - tct -- as above
+      - lst:list Ast.term -- for e.g. (and X Y), this list contains [X;Y].
+      - fuel:nat -- fuel (when 0, we stop)
+      - envTerm
+      - env
+      - a helper to recursively reify forms
+      - a helper to recursively reify terms
+      - return again a a pair of term and proof *)
   Definition baseConnectiveReifier := Ast.term -> list Ast.term -> nat -> Ast.term -> (Ast.term -> FailureMonad nat) -> helperFormReifierType -> helperTermReifierType -> FailureMonad (prod Ast.term Ast.term).
   Definition baseConnectiveVars := list Ast.term -> nat -> Ast.term -> helperFormVarsType -> helperTermVarsType -> FailureMonad (list Ast.term).
-
+  (** Extension point for term reification. Args are:
+      - tct:Ast.term
+      - fuel:nat (also for var finder)
+      - t:term (also for var finder) -- the actual term
+      - envTerm
+      - env
+      - recursion helper (also for var finder)
+      - returning the usual *)
   Definition termFinderVars := nat -> Ast.term -> helperTermVarsType -> FailureMonad (list Ast.term).
   Definition termFinderReifier := Ast.term -> nat -> Ast.term -> Ast.term -> (Ast.term -> FailureMonad nat) 
                                   -> helperTermReifierType -> FailureMonad (prod Ast.term Ast.term).
-
+  (** Extension point for form reification. Args are:
+      - tct:Ast.term
+      - fuel:nat (also for var finder)
+      - t:term (also for var finder) -- the actual term
+      - frees
+      - envTerm
+      - env
+      - recursion helper for forms (also for var finder)
+      - recursion helper for terms (also for var finder)
+      - returning the usual *)
   Definition propFinderVars := Ast.term -> nat -> Ast.term -> nat -> helperFormVarsType -> helperTermVarsType -> (FailureMonad (list Ast.term)).
   Definition propFinderReifier := Ast.term -> nat -> Ast.term -> nat -> Ast.term -> (Ast.term -> FailureMonad nat) -> helperFormReifierType -> helperTermReifierType -> FailureMonad (prod Ast.term Ast.term).
 
-  (* When running in no proof mode, extension points still expect proofs. We give this dummy term. If the extension point only uses this to build further proofs, the whole term is discarded in the end *)
+  (** When running in no proof mode, extension points still expect proofs. We give this dummy term. If the extension point only uses this to build further proofs, the whole term is discarded in the end *)
   Definition noProofDummy := tVar "NoProofGivenBecauseWeAreInNoProofMode".
-  (* An instance of this class is required for the reifier to work. From it the basic reification building blocks are derived *)
+  (** An instance of this class is required for the reifier to work. From it the basic reification building blocks are derived *)
   Class tarski_reflector := {
     fs : funcs_signature; 
     ps : preds_signature; (* ps and fs give the syntax *)
@@ -139,21 +188,24 @@ Section AbstractReflectionDefinitions.
     emptyEnv : nat -> D;  (* We need an "empty" env that returns some default value for our types *)
     isD : Ast.term -> bool;  (* Returns true iff the given term references D used above *)
   }. 
-  (* Extension point to extend the libary to more syntactic constructs *)
+  (** Extension point to extend the libary to more syntactic constructs *)
   Class tarski_reflector_extensions (t:tarski_reflector) := {
+    (** for reifying instances of inductive types Coq.Init.Logic.* applied to arguments. Mostly used for reifying eq *)
     baseLogicConnHelper : option (string -> baseConnectiveReifier); 
-    baseLogicVarHelper : option (string -> baseConnectiveVars);     (* for reifying instances of inductive types Coq.Init.Logic.* applied to arguments. Mostly used for reifying eq *)
-    termReifierVarHelper : option termFinderVars;    
-    termReifierReifyHelper : option termFinderReifier;              (* for reifying all terms that we fail to reify *)
+    baseLogicVarHelper : option (string -> baseConnectiveVars);
+    (** for reifying all terms that we fail to reify *)
+    termReifierVarHelper : option termFinderVars;
+    termReifierReifyHelper : option termFinderReifier;
+    (** for reifying all forms that we fail to reify *)
     formReifierVarHelper : option propFinderVars;
-    formReifierReifyHelper : option propFinderReifier               (* for reifying all forms that we fail to reify *)
+    formReifierReifyHelper : option propFinderReifier
   }.
-  (* Used if no instance of the above extension class can be found *)
+  (** Used if no instance of the above extension class can be found *)
   Definition defaultExtensions tr : tarski_reflector_extensions tr := Build_tarski_reflector_extensions tr None None None None None None.
-  (* Useful builder to build the main tarski_reflector class *)
+  (** Useful builder to build the main tarski_reflector class *)
   Definition buildDefaultTarski {fs:funcs_signature} {ps:preds_signature} {D:Type} {I:@interp fs ps D} (point:D) (isD:Ast.term -> bool) := Build_tarski_reflector fs ps D I (fun n:nat => point) isD.
   Context {tr : tarski_reflector}.
-  (* These types are used to define representability. A n-ary formula is representable if there is a syntactic formula and an environment that you can plug the relevant values into that is equivalent *)
+  (** These types are used to define representability. A n-ary formula is representable if there is a syntactic formula and an environment that you can plug the relevant values into that is equivalent *)
   Fixpoint naryProp (n:nat) : Type := match n with 0 => Prop | S nn => D -> naryProp nn end.
   Fixpoint representsP {n:nat} phi rho : (forall (P:naryProp n), Prop) := match n return (forall (P:naryProp n), Prop) with
        0  => (fun (P:Prop) => P <-> @sat fs ps D I rho phi)
@@ -162,7 +214,7 @@ Section AbstractReflectionDefinitions.
   Definition representsF (d:D) trm rho := @eval fs ps D I rho trm = d.
   Definition representableF (d:D) := exists trm rho, representsF d trm rho.
 
-  (* Functions that allow us to construct syntactic connective applications without building vectors in MetaCoq *)
+  (** Functions that allow us to construct syntactic connective applications without building vectors in MetaCoq *)
   Fixpoint naryGFunc (n:nat) (A R : Type) := match n with 0 => R | S n => A -> @naryGFunc n A R end.
   Fixpoint takeMultiple {n : nat} (X Y:Type)  : (Vector.t X n -> Y) -> @naryGFunc n X Y := 
      match n as nn return (Vector.t X nn -> Y) -> @naryGFunc nn X Y
@@ -175,7 +227,6 @@ Section AbstractReflectionDefinitions.
                       := match n with 0 => fun mA mB => C' (mA (Vector.nil A)) (mB (Vector.nil B))
                                   | S n => fun mA mB => forall (a:A) (b:B), C a b -> @nary3GFunc n A B A' B' C C' (fun v => mA (Vector.cons A a n v)) (fun v => mB (Vector.cons B b n v)) end.
 
-  (* Proof that the functions build using the above helper actually represent the syntactic construct they are supposed to represent *)
   Definition mergeTermBase (c:@syms (@fs tr)) : Type := 
   forall (rho:nat -> D), @nary3GFunc (ar_syms c) term D term D 
                                      (fun t d => representsF d t rho) (fun t d => representsF d t rho) 
@@ -199,6 +250,7 @@ Section AbstractReflectionDefinitions.
   Definition mergeFormProtoType (rho:nat -> D) (n:nat) (fZ:vec term n -> form) (ifZ : vec D n -> naryProp 0) := 
          (forall v : vec term n, @sat fs ps D I rho (fZ v) = ifZ (Vector.map (@eval fs ps D I rho) v))  
          -> @nary3GFunc n term D form (naryProp 0) (fun t d => representsF d t rho) (fun t P => representsP t rho P) fZ ifZ.
+  (** Proof that the functions built using the above helper actually represent the syntactic construct they are supposed to represent *)
   Definition mergeFormProto (rho:nat -> D) (n:nat) (fZ:vec term n -> form) (ifZ : vec D n -> naryProp 0) : mergeFormProtoType rho n fZ ifZ.
   Proof.
   intros H. induction n as [|n IH].
@@ -207,7 +259,7 @@ Section AbstractReflectionDefinitions.
   Defined.
   Definition mergeForm (c:preds) : mergeFormBase c.
   Proof. intros rho. eapply mergeFormProto. now intros v. Defined.
-  (* Quotes of these functions which are later used to construct (proof) terms *)
+  (*+ Quotes of these functions which are later used to construct (proof) terms *)
   MetaCoq Quote Definition qConstructTerm := constructTerm.
   MetaCoq Quote Definition qMergeTerm := mergeTerm.
   MetaCoq Quote Definition qConstructForm := constructForm.
@@ -215,15 +267,28 @@ Section AbstractReflectionDefinitions.
 End AbstractReflectionDefinitions.
 
 Section TarskiMerging.
-  (* Code to merge the basic tarski semantics that is fixed for all models - namely logical and, or, implication, falsity, forall and exists-quantisation *)
+  (** **TarskiMerging
+        Here we have reifiers for basic logical connectives which are part of the core Tarski semantics and thus every model.
+        These are and, or, falsity, implication and both quantifiers *)
   Context {tr : tarski_reflector}.
   Context {te : tarski_reflector_extensions tr}.
+  (** For each connective, we have a "merger" that takes subproof that a term is represented by its reification, and proof that the larger term also represents its subterm.
+      For falsity, there are not subterms, so we just prove that fal represents False, which is trivial *)
   Definition mergeFalse (rho:nat -> D) : @representsP tr 0 fal rho False.
   Proof. easy. Defined.
+  (** We then define a quoted version of the above proof which is later used to build subterms *)
   MetaCoq Quote Definition qMergeFalse := @mergeFalse.
+  (** We also define a form merger, which is a function that takes the reified subterms (not the proofs) and builds the reified term. For False, this is just a term that represents false (here given without syntact sugar) *)
   Definition mFalse := (@fal fs ps full_operators).
+  (** Finally we define a quoted form merger which will then later be applied to the subforms *)
   MetaCoq Quote Definition qMergeFormFalse := @mFalse.
 
+  (** The same development for And. Note that this time we have subproofs. Our function arguments follow this pattern:
+      - tr_quoted - quoted tarski_reflector (not visible in the arguments, but it's a context variable. Note that since the functions don't acually use te, it does not become part of the arguments outside the section
+      - environment
+      - coq subterms that are to be reified
+      - reified subterms
+      - proof that the reified subterms are actually the reifications *)
   Definition mergeAnd (rho:nat -> D) (P Q : naryProp 0) (fP fQ : form) : representsP fP rho P -> representsP fQ rho Q -> @representsP tr 0 (fP∧fQ) rho (P /\ Q).
   Proof.
   intros [pPl pPr] [pQl pQr]. split.
@@ -231,9 +296,11 @@ Section TarskiMerging.
   * intros [pP pQ]. split. now apply pPr. now apply pQr.
   Defined.
   MetaCoq Quote Definition qMergeAnd := @mergeAnd.
+  (** This is the form merger for and. It is unfolded syntactic sugar, once one adds the arguments x and y, this will read x ∧ y. *)
   Definition mAnd := (@bin fs ps full_operators Conj).
   MetaCoq Quote Definition qMergeFormAnd := @mAnd.
 
+  (** The same development for or*)
   Definition mergeOr (rho:nat -> D) (P Q : naryProp 0) (fP fQ : form) : representsP fP rho P -> representsP fQ rho Q -> @representsP tr 0 (fP∨fQ) rho (P \/ Q).
   Proof.
   intros [pPl pPr] [pQl pQr]. split.
@@ -244,6 +311,7 @@ Section TarskiMerging.
   Definition mOr := (@bin fs ps full_operators Disj).
   MetaCoq Quote Definition qMergeFormOr := @mOr.
 
+  (** The same development for existential quantifiaction. Note that the P argument is a 1-ary predicate.*)
   Definition mergeExists (rho:nat -> D) (P:naryProp 1) (fP:form) : representsP fP rho P -> @representsP tr 0 (∃ fP) rho (exists q:D, P q).
   Proof.
   intros pR. split.
@@ -254,6 +322,7 @@ Section TarskiMerging.
   Definition mExists := (@quant fs ps full_operators Ex).
   MetaCoq Quote Definition qMergeFormExists := @mExists.
 
+  (** The same development for implication. Note that implication is handled in the main reification logic since P -> Q is just syntactic sugar for (forall _:P, Q)*)
   Definition mergeImpl (rho:nat -> D) (P Q : naryProp 0) (fP fQ : form) : representsP fP rho P -> representsP fQ rho Q -> @representsP tr 0 (fP --> fQ) rho (P -> Q).
   Proof.
   intros HP HQ.
@@ -264,7 +333,7 @@ Section TarskiMerging.
   MetaCoq Quote Definition qMergeImpl := @mergeImpl.
   Definition mImpl := (@bin fs ps full_operators Impl).
   MetaCoq Quote Definition qMergeFormImpl := @mImpl.
-
+  (** The same development for forall. Since forall-quantification in Coq is a part of the proper syntax (product types), this will again be handled by the main reification*)
   Definition mergeForall (rho:nat -> D) (Q:naryProp 1) (phi:form) : representsP phi rho Q -> @representsP tr 0 (∀ phi) rho (forall x:D, Q x).
   Proof. intros H. cbn. split;
    intros HH d; specialize (HH d); specialize (H d); cbn in H; apply H, HH.
@@ -279,14 +348,16 @@ Section TarskiMerging.
   MetaCoq Quote Definition qMergeFormIff := @mIff.
   MetaCoq Quote Definition qMergeIff := mergeIff. 
 
+  (** The same development for truth. Note that truth has no canonical representative in the tarski semantics. It is equivalent to (falsity -> falsity), but not computationally equal. So using True in noProof mode would fail.*)
   Definition mergeTrue (rho:nat -> D) : @representsP _ 0 (fal-->fal) rho (True).
   Proof. cbn. tauto. Defined.
   Definition mTrue := (mImpl mFalse mFalse).
   MetaCoq Quote Definition qMergeFormTrue := @mTrue.
   MetaCoq Quote Definition qMergeTrue := mergeTrue.
 
-  (* Notation for matching constructs like Coq.Init.Logic.and prop1 prop2 -> (x:="and", l:=[term1, term2]) *)
+  (** Notation for matching constructs like Coq.Init.Logic.and prop1 prop2 -> (x:="and", l:=[term1, term2]) *)
   Notation baseLogicConn x l:= (tInd {| inductive_mind := (MPfile (["Logic"; "Init"; "Coq"]), x); inductive_ind := 0 |} l).
+  (** We now define reification helpers for each of the primitives (except implication&forall). These helpers recursively apply the main reification function to the subterms and assemble the resulting term/prood*)
   Definition reifyFalse : baseConnectiveReifier := fun tct lst _ envTerm env fPR _ => match lst with nil => ret (tApp qMergeFormFalse ([tct]), tApp qMergeFalse ([tct;envTerm])) | _ => fail "False applied to terms" end. 
   Definition reifyAnd : baseConnectiveReifier := fun tct lst _ envTerm env fPR _ => match lst with [x; y] => 
                                              xr <- fPR x 0 envTerm env;;yr <- fPR y 0 envTerm env;; let '((xt,xp),(yt,yp)) := (xr,yr) in
@@ -302,12 +373,13 @@ Section TarskiMerging.
                                              ret (tApp qMergeFormIff ([tct;xt;yt]), tApp qMergeIff ([tct;envTerm;x;y;xt;yt;xp;yp])) | _ => fail "Iff applied to != 2 terms" end.
   Definition reifyTrue : baseConnectiveReifier := fun tct l fuel envTerm env fPR _ => match l with nil =>
                                              ret (tApp qMergeFormTrue ([tct]), tApp qMergeTrue ([tct;envTerm]))| _ => fail "True applied to terms" end.
+  (** The main handler. Given the name of the base type, call the respective helper. If nothing matches, call the extension point *)
   Definition reifyBase (s:string): baseConnectiveReifier 
                             := match s with "and" => reifyAnd | "or" => reifyOr | "ex" => reifyExist |  "False" => reifyFalse | "True" => reifyTrue |
                                        _ => match baseLogicConnHelper with 
                                              None =>fun _ _ _ _ _ _ _ => fail ("Unknown connective "++s) | 
                                              Some k => k s end end.
-  (* Used in no-proof mode, where we just build the representing term and hope they are computationally equal *)
+  (** The same development for no-proof mode. Similar, except we don't build proofs *)
   Definition baseConnectiveReifierNP := Ast.term -> list Ast.term -> nat -> Ast.term -> (Ast.term -> FailureMonad nat) -> 
                                        (Ast.term -> nat -> Ast.term -> (Ast.term -> FailureMonad nat) -> FailureMonad ( Ast.term)) -> 
                                        (Ast.term -> Ast.term -> Ast.term -> (Ast.term -> FailureMonad nat) -> FailureMonad (Ast.term)) -> FailureMonad (Ast.term).
@@ -326,6 +398,7 @@ Section TarskiMerging.
                                              ret (tApp qMergeFormIff ([tct;xt;yt])) | _ => fail "Iff applied to != 2 terms" end.
   Definition reifyTrueNP : baseConnectiveReifierNP := fun tct l fuel envTerm env fPR _ => match l with nil =>
                                              ret (tApp qMergeFormTrue ([tct]))| _ => fail "True applied to terms" end.
+  (** The helper is a bit more interesting, since it calls the extension point, building a recursive "dummy proof" helper and discarding the resulting proof *)
   Definition reifyBaseNP (s:string): baseConnectiveReifierNP 
                             := match s with "and" => reifyAndNP | "or" => reifyOrNP | "ex" => reifyExistNP |  "False" => reifyFalseNP |  "True" => reifyTrueNP | 
                                        _ => match baseLogicConnHelper with 
@@ -337,10 +410,17 @@ Section TarskiMerging.
 End TarskiMerging.
 
 Section ReificationHelpers.
-  (* Construct the reification (and potentially the proof) of the connectives being used on points of D *)
+  (** **ReificationHelpers
+      These functions reify atomic functions/relations *)
+  (** Definition of the types. The arguments are:
+      - tct:Ast.term - quoted instance of tarski_reflector
+      - av:list Ast.term - the arguments of an atomic relation/function to be recursively reified
+      - envTerm
+      - recursive helper, to which av is passed one-by-one
+      - the return is again either a pair of term&proof, or just the term if in no proof mode *)
   Definition termReifier := Ast.term -> list Ast.term -> Ast.term -> (Ast.term -> FailureMonad (prod Ast.term Ast.term)) -> FailureMonad (prod Ast.term Ast.term).
   Definition termReifierNP := Ast.term -> list Ast.term -> Ast.term -> (Ast.term -> FailureMonad (Ast.term)) -> FailureMonad (Ast.term).
-  (* typeClassTerm -> vector of args -> env term -> recursion for arg vector -> prod (term, proof that term represents input *)
+  (** Args: typeClassTerm -> vector of args -> env term -> recursion for arg vector -> prod (term, proof that term represents input *)
   Fixpoint applyRecursively (lt : list Ast.term) (IH : Ast.term -> FailureMonad (prod Ast.term Ast.term)) : FailureMonad (prod (list Ast.term) (list Ast.term)) :=
      match lt with nil => ret (nil,nil)
                | t::tr => IHt <- IH t;; atrIH <- applyRecursively tr IH;;let '(rep,prf) := IHt in let '(replist,fulllist) := atrIH in ret (rep::replist, rep::t::prf::fulllist) end.
@@ -358,19 +438,26 @@ Section ReificationHelpers.
 End ReificationHelpers.
 
 Section EnvHelpers.
-  (* Working with the environment. Since it is sometimes pulled into lambda-functions, and contains tRel terms, it has to be correctly inserted into the lower term *)
+  (** ** EnvHelpers
+      Useful functions for extending the environment. A 3-ary predicate P(k1,k2,k3) (for example) is represented by a term t where t in environ (k3:k2:k1:env) represents P (k1,k2,k3).*)
+  (** Appends something to the start of the env. *)
   Definition appendZero (env:Ast.term -> FailureMonad nat) (zv:FailureMonad nat) : (Ast.term -> FailureMonad nat) := 
         fun (t:Ast.term) => match t with tRel n => (match n with 0 => zv | S n => env (tRel n) end) | _ => k <- lowerRelIndex 0 (fail "tRel 0 used when lowering") t;; (env k) end.
+  (** Appends something to the start of the env. At the same time, it expects the terms given to the env helper to be one level deeper, so it "unshifts" the tRels first *)
   Definition appendAndLift (env:Ast.term -> FailureMonad nat) (zv:FailureMonad nat) : (Ast.term -> FailureMonad nat) := 
         fun t => match t with tRel n => (match n with 0 => zv | S n => k <- env (tRel n);;ret (S k) end) | _ => k <- lowerRelIndex 0 (fail "tRel 0 used when lowering") t;; v <- env k;;ret (S v) end.
   MetaCoq Quote Definition qD := @D.
   MetaCoq Quote Definition qScons := @scons.
+  (* Appends d to the env *)
   Definition raiseEnvTerm (tct:Ast.term) (d:Ast.term) (env:Ast.term) : Ast.term := tApp (qScons) ([tApp qD ([tct]);d;env]).
+  (* The env helper for the empty environ, which always fails *)
   Definition unboundEnv := (fun a:Ast.term => @fail nat ("unbound " ++ string_of_term a)).
 End EnvHelpers.
 
 Section EnvConstructor.
-  (* Constructs the environment used to help with free variables in terms *)
+  (** ** EnvConstructor
+      Constructs the environment used to help with free variables in terms *)
+  (** Useful quotations *)
   Existing Instance config.default_checker_flags.
   MetaCoq Quote Definition qFs := @fs.
   MetaCoq Quote Definition qLocalVar := @var.
@@ -378,15 +465,15 @@ Section EnvConstructor.
   MetaCoq Quote Definition qI_P := @i_P.
   Context {tr : tarski_reflector}.
   Context {te : tarski_reflector_extensions tr}.
-  (* Given a term in the semantic, construct an environment that contains all atoms that appear in the term (and are not otherwise representable) *)
+  (** Given a term in the semantic, construct an environment that contains all atoms that appear in the term (and are not otherwise representable) *)
   Fixpoint findUBRecursively (lt : list Ast.term) (IH : Ast.term -> FailureMonad (list Ast.term)) : FailureMonad ((list Ast.term) ) :=
        match lt with nil => ret (nil)
                  | t::tr => rep <- IH t;; replist <- findUBRecursively tr IH;;ret (rep++replist) end.
-  
+  (** Finds all free variables in a term *)
   Fixpoint findUnboundVariablesTerm (fuel:nat) (t:Ast.term) {struct fuel}: (FailureMonad (list Ast.term)) := match fuel with 
       0 => fail "Out of fuel" 
       | S fuel => let ffail := orelse (match @termReifierVarHelper _ te with None => fail "Fallthrough" | Some k => k fuel t (findUnboundVariablesTerm fuel) end)
-                        (match t with tRel _ => ret nil | _ => ret ([t]) end) in (* tRel are things introduced by forall/exists and so on, which we do not add to the environment *)
+                        (match t with tRel _ => ret nil | _ => ret ([t]) end) in (** tRel are things introduced by forall/exists and so on, which we do not add to the environment *)
           match t with
           tApp arg l => if Checker.eq_term init_graph arg qI_f then match popNElements l 4 with (*4 for funcs, preds, domain, interp *)
             Some ([fnc;v]) => vr <- recoverVector v;;findUBRecursively vr (findUnboundVariablesTerm fuel)
@@ -394,9 +481,9 @@ Section EnvConstructor.
         | _ => ffail
       end 
     end.
-  (*Our notation from above*)
+  (**Our notation from above*)
   Notation baseLogicConn x l:= (tInd {| inductive_mind := (MPfile (["Logic"; "Init"; "Coq"]), x); inductive_ind := 0 |} l).
-  (* Find the unbound variables for our basic forms *)
+  (** Find the unbound variables for our basic forms *)
   Definition findUBFalse  :baseConnectiveVars := fun lst _ _ fPR _ => match lst with nil => 
                                              ret (nil) | _ => fail "False applied to terms" end.
   Definition findUBAnd  :baseConnectiveVars := fun lst _ _ fPR _ => match lst with [x; y] => 
@@ -415,7 +502,9 @@ Section EnvConstructor.
           := match s with "and" => findUBAnd | "or" => findUBOr | "ex" => findUBExists | "False" => findUBFalse | "True" => findUBFalse | _ => 
                 match @baseLogicVarHelper tr te with None => fun _ _ _ _ _ => fail ("Unknown connective "++s) | Some k => k s end end.
   MetaCoq Quote Definition qIff := @iff.
+  (** Checks whether a term is the type of theory terms in Coq. *)
   Definition maybeD : Ast.term -> Ast.term -> bool := fun tct mD => if @isD tr mD then true else Checker.eq_term init_graph mD (tApp qD ([tct])).
+  (** Finds the unbound variables in a form *)
   Fixpoint findUnboundVariablesForm (tct:Ast.term) (fuel:nat) (t:Ast.term) (frees:nat) {struct fuel}: (FailureMonad (list Ast.term)) := 
   let ffail := fail ("Cannot introspect form "++ string_of_term t) in match fuel with 0 => fail "Out of fuel" | S fuel => 
     match (frees,t) with
@@ -435,17 +524,27 @@ Section EnvConstructor.
         findUnboundVariablesForm tct fuel P n
        else ffail
   | _ => ffail  end end.
- (* Builds the actual env out of a list of free variables *)
+ (** Builds the actual env out of a list of free variables *)
  Fixpoint createEnvTerms (tct:Ast.term) (l:list Ast.term) (base:Ast.term) : prod (Ast.term) (Ast.term -> FailureMonad nat) := match l with 
        nil => (base,unboundEnv)
    | x::xr => let '(envTerm,env) := createEnvTerms tct xr base in (raiseEnvTerm tct x envTerm, fun a:Ast.term => if Checker.eq_term init_graph x a then ret 0 else v <- env a;;ret (S v)) end.
 End EnvConstructor.
 
 Section MainReificationFunctions.
+  (** ** MainReificationFunctions
+  Constructs the actual reifications, putting everything together *)
   Context {tr : tarski_reflector}.
   Context {te : tarski_reflector_extensions tr}.
   Existing Instance config.default_checker_flags.
-  (* Constructs the actual term representing some term of the model, along with a proof *)
+  (** *** Terms 
+   Constructs the representation for terms.*)
+  (** Arguments:
+      - tct -- the quoted instance of tarski_reflector
+      - fuel -- fuel
+      - t -- the term to reify
+      - termEnv -- the env term
+      - env -- the env helper
+      - returns the pair of reification/proof *)
   Fixpoint findTermRepresentation (tct:Ast.term) (fuel:nat) (t:Ast.term) (termEnv:Ast.term) (env:Ast.term -> FailureMonad nat) {struct fuel}: (FailureMonad (prod Ast.term Ast.term)) := match fuel with 
       0 => fail "Out of fuel" 
       | S fuel =>
@@ -457,7 +556,7 @@ Section MainReificationFunctions.
         | _ => fallback
       end 
     end.
-  (* Like the above, but without the proof *)
+  (** Like the above, but without the proof *)
   Fixpoint findTermRepresentationNP (tct:Ast.term) (fuel:nat) (t:Ast.term) (termEnv:Ast.term) (env:Ast.term -> FailureMonad nat) {struct fuel}: (FailureMonad (Ast.term)) := match fuel with 
       0 => fail "Out of fuel" 
       | S fuel =>
@@ -471,8 +570,14 @@ Section MainReificationFunctions.
     end.
 
     Notation baseLogicConn x l:= (tInd {| inductive_mind := (MPfile (["Logic"; "Init"; "Coq"]), x); inductive_ind := 0 |} l).
-
-    (* Like the above, but here we do it for statements about points of D instead of points of D *)
+   (** *** Forms *)
+    (* Like the above, but here we do it for forms. Arguments:
+       - tct -- like above
+       - fuel -- like above
+       - t -- the term
+       - frees: the arity of the form we are reifying. If nonzero, the form must be a lambda term
+       - envTerm -- the env, quoted
+       - env -- the env helper *)
     Fixpoint findPropRepresentation (tct:Ast.term) (fuel:nat) (t:Ast.term) (frees:nat) (envTerm:Ast.term) (env:Ast.term -> FailureMonad nat) {struct fuel}: (FailureMonad (prod Ast.term Ast.term)) := 
     match fuel with 0 => fail "Out of fuel" | S fuel => 
     let ffail := orelse (match @formReifierReifyHelper _ te with None => fail "none" | Some k => k tct fuel t frees envTerm env (findPropRepresentation tct fuel) (fun l => findTermRepresentation l fuel) end) 
@@ -497,7 +602,7 @@ Section MainReificationFunctions.
           ret (tk,(tLambda x (tApp qD ([tct])) pk))
          else ffail
     | _ => ffail end end.
-    (* like the above but again the no-proof version *)
+    (** like the above but again the no-proof version *)
     Fixpoint findPropRepresentationNP (tct:Ast.term) (fuel:nat) (t:Ast.term) (frees:nat) (envTerm:Ast.term) (env:Ast.term -> FailureMonad nat) {struct fuel}: (FailureMonad (Ast.term)) := 
     match fuel with 0 => fail "Out of fuel" | S fuel => 
       let ffail := orelse (match @formReifierReifyHelper _ te with None => fail "none" | Some k => rr <- k tct fuel t frees envTerm env (fun t f et e => v <- findPropRepresentationNP tct fuel t f et e;; ret (v,noProofDummy)) (fun l t et e => v <- findTermRepresentationNP l fuel t et e;;ret (v,noProofDummy));;let '(trm,_) := rr in ret trm end)  
@@ -524,8 +629,11 @@ Section MainReificationFunctions.
     | _ => ffail end end.
 End MainReificationFunctions.
 
-(* Given an env and an env helper, represent a statement about D (find a from and a proof that represents it *)
+(** Default fuel. This is enough for all terms with depth 100 *)
 Definition FUEL := 100. 
+(** ** Tactics
+ All tactics expect the goal to be representable n P *)
+(** Tactic that calls findPropRepresentation. Given an env (unquoted) and a respective env helper *)
 Ltac representEnvP env env2:= 
 match goal with [ |- @representableP ?i ?n ?G ] =>
   let rep := fresh "rep" in let prf := fresh "prf" in let k y := (destruct y as [rep prf]) in
@@ -541,7 +649,7 @@ match goal with [ |- @representableP ?i ?n ?G ] =>
   ;exists rep;exists env;exact prf 
 end.
 
-(* Like the above, but no-proof mode. We hope easy can proof it*)
+(** Like the above, but no-proof mode. We hope easy can proof it, if not the user must close (or alternatively try  representEnvP )*)
 Ltac representEnvPNP env env2:= 
 match goal with [ |- @representableP ?i ?n ?G ] =>
   let rep := fresh "rep" in let prf := fresh "prf" in let k y := (pose y as rep) in
@@ -556,7 +664,7 @@ match goal with [ |- @representableP ?i ?n ?G ] =>
   ;exists rep;exists env;try easy 
 end.
 
-(* Construct the environment, then invoke another ltac *)
+(** Construct the environment, then invoke another ltac with the build environment and the respective env helper (continuation-passing style) *)
 Definition HiddenTerm {X:Type} {x:X} := x.
 Ltac constructEnvCont cont := 
 match goal with [ |- @representableP ?i ?n ?G ] => (*(pose (fst y) as envBase;pose (snd y) as envTerm*)
@@ -570,12 +678,13 @@ match goal with [ |- @representableP ?i ?n ?G ] => (*(pose (fst y) as envBase;po
                          monad_utils.bind (tmUnquoteTyped (nat -> @D i) envToDR) (fun envToD => 
                          monad_utils.ret (pair envToD envToNat)))))))) cont)
 end.
-(* Construct the env, then bind it to envBase and envTerm *)
+(** Construct the env, then bind it to envBase and envTerm. Useful if one does not actually want to show representability with the automation but just build the environment*)
 Ltac constructEnv' envBase envTerm := match goal with [ |- @representableP ?i ?n ?G ] => let k y := (pose (@HiddenTerm (nat -> @D i) (fst y)) as envBase;pose (@HiddenTerm (Ast.term -> FailureMonad nat) (snd y)) as envTerm) in constructEnvCont k end. 
 Ltac constructEnv := let envBase := fresh "envBase" in let envTerm := fresh "envTerm" in constructEnv' envBase envTerm.
 
-(* First build the env, then use it to proof representability*)
+(** The main tactic. Builds an environment, finds a reification and a proof of correctness. Calls the above tactics *)
 Ltac represent := match goal with [ |- @representableP ?i ?n ?G ] => let tac k := (let envBase := fresh "envBase" in (pose (@HiddenTerm (nat -> @D i) (fst k)) as envBase); representEnvP envBase (snd k)) in constructEnvCont tac end.
+(** The same, but without the proof *)
 Ltac representNP := match goal with [ |- @representableP ?i ?n ?G ] => let tac k := (let envBase := fresh "envBase" in (pose (@HiddenTerm (nat -> @D i) (fst k)) as envBase); representEnvPNP envBase (snd k)) in constructEnvCont tac end.
 (*Ltac representNP := let envBase := fresh "envBase" in let envTerm := fresh "envTerm" in constructEnv' envBase envTerm; representEnvPNP envBase envTerm.*)
 
