@@ -167,8 +167,9 @@ Print k.
     MetaCoq Quote Definition qMergeEqProp := mergeEqProp.
     Definition reifyCoqEq : baseConnectiveReifier := fun proof tct l fuel envTerm env fPR fTR => match l with [tv; x; y] => if maybeD tct tv then
                                                xr <- fTR proof tct x envTerm env ;;
-                                               yr<-  fTR proof tct y envTerm env ;; let '((xt,xp),(yt,yp)) := (xr,yr) in
-                                               ret (tApp qMergeFormEq ([xt;yt]), ifProof proof (tApp qMergeEqProp ([envTerm;x;y;xt;yt;xp;yp]))) else fail "Eq applied to wrong type" | _ => fail "Eq constructor applied to != 2 terms" end.
+                                               yr<-  fTR proof tct y envTerm env ;; 
+                                               ret (mergeTwoE proof envTerm qMergeFormEq qMergeEqProp x y xr yr)
+                                           else fail "Eq applied to wrong type" | _ => fail "Eq constructor applied to != 2 terms" end.
     Definition varsCoqEq : baseConnectiveVars := fun lst fuel tct _ fUVT => match lst with [tv; x; y] => if maybeD tct tv then
                                                xr <- fUVT x;;
                                                yr <- fUVT y;;
@@ -176,7 +177,7 @@ Print k.
     Definition reifyBLC (s:string) : baseConnectiveReifier := match s with "eq" => reifyCoqEq | _ => fun _ _ _ _ _ _ _ _ => fail ("Unknown connective " ++ s) end.
     Definition varsBLC (s:string) : baseConnectiveVars := match s with "eq" => varsCoqEq | _ => fun _ _ _ _ _ => fail ("Unknown connective " ++ s) end.
     Definition findVarsTerm : termFinderVars := fun fuel t fUVT => match t with (tApp qMu ([k])) => ret nil | _ => fail "Fail" end.
-    Definition reifyTerm : termFinderReifier := fun proof tct fuel t envTerm env fTR => match t with tApp qMu ([k]) => ret (tApp qMergeTermMu ([k]), ifProof proof (tApp qMergeMu ([envTerm;k]))) | _ => fail "Fail" end.
+    Definition reifyTerm : termFinderReifier := fun proof tct fuel t envTerm env fTR => match t with tApp qMu ([k]) => match proof return proofRT proof with true => ret (tApp qMergeTermMu ([k]),(tApp qMergeMu ([envTerm;k]))) | false => ret (tApp qMergeTermMu ([k])) end | _ => fail "Fail" end.
   End ReflectionExtension.
   Instance PA_reflector_ext : tarski_reflector_extensions PA_reflector := {| (*Cannot define instance in section because they are dropped afterwards *)
     baseLogicConnHelper := Some (reifyBLC);
@@ -198,7 +199,7 @@ Print k.
   Time represent. 
   Qed.
   Goal (representableP 2 (fun (d e :D) => forall g, exists j, g i= d i⊕ j /\ False -> False \/ (e i⊗ iO i= iσ j /\ False))).
-  Time representNP.
+  Time representNPFast.
   Qed.
   Goal (representableP 0 (forall a b, a i= b)).
   Time represent. 
@@ -298,7 +299,7 @@ Print k.
   intros d e. represent. Show Proof.
   Qed.
   Goal forall (d e:D), representableP 0 (d i= e <-> False).
-  intros d e. representNP. Show Proof.
+  intros d e. representNP. Show Proof. Restart. intros d e. represent. Show Proof.
   Qed.
   Goal forall (d e:D), representableP 0 (d = e <-> True).
   intros d e. representNP. cbv in rep. unfold HiddenTerm, fst in envBase. Show Proof.
