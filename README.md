@@ -11,5 +11,6 @@ Examples are given in PA.v or ZF.v. You define an instance of `tarski_reflector`
 
 ## I want to know more! Why is this documentation so short.
 
-For more information, see the related [PDF documentation](https://github.com/JoJoDeveloping/ACP/blob/master/documentation/doc.pdf) or the [CoqDoc](https://github.com/JoJoDeveloping/ACP/blob/master/GeneralReflection.v).
+For more information, see the related [PDF documentation](https://github.com/JoJoDeveloping/ACP/blob/master/documentation/doc.pdf) or the [CoqDoc](https://jojodeveloping.github.io/ACP/GeneralReflection.html).
+If you are not viewing this file on GitHub, you should do so. Find the repository here: https://github.com/JoJoDeveloping/ACP
 
