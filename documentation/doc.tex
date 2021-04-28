@@ -176,7 +176,10 @@ The \lstinline|tarski_reflector| class is crucial and contains a complete descri
 \begin{lstlisting}
 Variable D' : Type.
 Context {I : interp D'}.
-Instance PA_reflector : tarski_reflector := buildDefaultTarski (i_f (f:=Zero) (Vector.nil D')) (fun k => match k with (tVar "D'") => true | _ => false end).
+Instance PA_reflector : tarski_reflector :=
+	buildDefaultTarski 
+	(iO) (* we need a point in D *)
+	(anyVariableOf ("D'" :: nil)). (* We need to know when some type is D *)
 \end{lstlisting}
 This example is taken from a Peano arithmetic development - the point therefore is the semantic representation of zero. Other developments might use the representation of the empty set or just assume that the model is nonempty.
 
@@ -211,11 +214,12 @@ When looking at the code, you will often find seemingly-identical versions of tw
 The basic idea is to pattern-match on various syntactic construct in the MetaCoq-quoted term. The two main functions that do this are \lstinline|findTermRepresentation| and \lstinline|findPropRepresentation|. The former matches on terms (terms are things that have type \lstinline|D| (semantically) or \lstinline|term| (syntactically)), the latter on forms (of type \lstinline|Prop|/\lstinline|form|). These call various helper methods which construct a quoted reification and a quoted proof term. While the process is written to be structurally recursive, it is extensible and thus many functions are instead written structurally recursive on some fuel.
 
 \subsection{Finding term representations}
-The type of \lstinline|findTermRepresentation| is \lstinline|Ast.term ->nat ->Ast.term ->Ast.term ->(Ast.term -> FailureMonad nat) -> FailureMonad (pair Ast.term Ast.term)|. There are two additional arguments, namely a \lstinline|tarski_reflector| and a corresponding
+The type of \lstinline|findTermRepresentation| is \lstinline|Ast.term ->nat ->Ast.term->Ast.term ->Ast.term ->(Ast.term -> FailureMonad nat) -> FailureMonad (pair Ast.term Ast.term)|. There are two additional arguments, namely a \lstinline|tarski_reflector| and a corresponding
 \lstinline|tarski_reflector_extensions|. These are context arguments in the source code. Here is a description of the other arguments:
 \begin{enumerate}
 \item The previous \lstinline|tarski_reflector|, quoted.
 \item The fuel. If it is 0, we stop.
+\item A quoted instance of the \lstinline|falsity_flag|, which is needed since syntac is parametric over whether falsity is allowed.
 \item The actual term to reify.
 \item The env term, quoted This is the environment which will be used in the representability proof (the first thing constructed by the \lstinline|createEnv| tactic). The default argument is the \enquote{empty} environment which returns an arbitrary point for all inputs.
 \item A function that, for a given part of a term, yields the index that term has in the env term. The default argument fails for all inputs. This function is called when we reach a term that we cannot represent otherwise, like \lstinline|tRel n|. We then look where \lstinline|tRel n| is in the environment (let's say at position \lstinline|k|) and then \lstinline|var k| is the representative, and \lstinline|eq_refl| the proof.
@@ -234,6 +238,7 @@ As before, we discuss the arguments. Note that the same 2 context-arguments we h
 \begin{enumerate}
 \item As before, \lstinline|tarski_reflector|, quoted.
 \item The fuel. If it is 0, we stop.
+\item A quoted instance of the \lstinline|falsity_flag|.
 \item The actual term to reify.
 \item The \enquote{frees}. When trying to prove something like \lstinline|representableP frees P|, the \lstinline|frees| used there. We use it to first \enquote{introduce} the \lstinline|n| free variables required. Afterwards, it is mostly 0, except when reifying the existential quantifier, where it is 1.
 \item The env term, quoted, as above.
@@ -259,6 +264,7 @@ The arguments are as follows:
 	\item As before, \lstinline|tarski_reflector|, quoted.
 	\item The list of all the arguments the original inductive type was specialized with
 	\item fuel
+	\item the quoted \lstinline|falsity_flag|
 	\item env term
 	\item env helper
 	\item A reduced-argument recursive-call-helper variant of \lstinline|findPropRepresentation|, where the first and second arguments are chosen appropriately.
